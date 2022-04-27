@@ -5,7 +5,9 @@
 Script to enable Radar functionality on a per cluster basis.  
 
 Example:
-python3 EnableRadar.py --keyfile RadarAutomation.json --clusterUUID 486a581e-3c5d-47c2-8cd0-9cc294438b87
+EnableRadarPassword.py --PolarisURL https://testpolaris.my.rubrik.com --username myuser@rubrik.com  --clusterUUID 486a581e-3c5d-47c2-8cd0-9cc294438b87
+Password:
+{'data': {'enableAutomaticFmdUpload': {'clusterId': '486a581e-3c5d-47c2-8cd0-9cc294438b87', 'enabled': True}}}
 
 Enables Radar functionality on cluster 486a581e-3c5d-47c2-8cd0-9cc294438b87
 
@@ -15,38 +17,48 @@ CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 import argparse
 import json
 import requests
-
+import getpass
 requests.packages.urllib3.disable_warnings()
 
 def parseArguments():
     parser = argparse.ArgumentParser(description='Parse Radar alerts from Polaris and send to syslog')
     parser.add_argument('--clusterUUID', dest='clusterUUID', help='specify the clusterUUID to enable')
+    parser.add_argument('--username', dest='username', help='specify the username for login')
+    #parser.add_argument('--password', dest='password', help='specify the password to login')
+    parser.add_argument('--PolarisURL', dest='PolarisURL', help='specify the polaris URL to login')
     parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = parseArguments()
-    json_keyfile = args.json_keyfile
+    username = args.username
+    #password = args.password
+    password = getpass.getpass()
+    PolarisURL = args.PolarisURL
     clusterUUID = args.clusterUUID
     
-    #Setup token auth 
-    json_file = open(json_keyfile)
-    json_key = json.load(json_file)
-    json_file.close()
-    session_url = json_key['access_token_uri']
+    #Setup auth session 
+    session_url = PolarisURL + "/api/session"
     payload = {
-        "client_id": json_key['client_id'],
-        "client_secret": json_key['client_secret'],
-        "name": json_key['name']
+        "username": username,
+        "password": password,
+        "domain_type": "localOrSSO",
+        "mfa_remember_token": ""
     }
     headers = {
         'Content-Type': 'application/json;charset=UTF-8',
         'Accept': 'application/json, text/plain'
     }
-    request = requests.post(session_url, json=payload, headers=headers, verify=False)
+    request = requests.post(
+    session_url,
+    json=payload,
+    headers=headers,
+    )
+    #request = requests.post(session_url, json=payload, headers=headers, verify=False)
     del payload
     response_json = request.json()
+    #print(response_json) 
     if 'access_token' not in response_json:
         print("Authentication failed!")
     access_token = response_json['access_token']
@@ -60,20 +72,19 @@ if __name__ == '__main__':
     'Authorization':PolarisToken
     }
 
-    mutation = """mutation ToggleRadarPrefsMutation($clusterId: UUID!, $enabled: Boolean!) {
-  enableAutomaticFmdUpload(clusterUuid: $clusterId, enabled: $enabled) {
+    mutation = """mutation EnableAutomaticFmdUpload($clusterUuid: UUID!, $enabled: Boolean!) {
+  enableAutomaticFmdUpload(clusterUuid: $clusterUuid, enabled: $enabled) {
     clusterId
     enabled
-    __typename
   }
 }"""
     variables = {}
     variables['enabled'] = True
-    variables['clusterId'] = clusterUUID
+    variables['clusterUuid'] = clusterUUID
 
     JSON_BODY = {
-    "query": mutation,
-    "variables": variables
+        "query": mutation,
+        "variables": variables
     }
     PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
     Result = PolarisQuery.json()
