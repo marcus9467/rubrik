@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     if bool(allClusters) == True:
         print("Gathering all known cluster UUIDs to enable with Radar")
-        clusterQuery = """query RadarClusterListQuery {radarClusterConnection {nodes {lambdaConfig {clusterId enableAutomaticFmdUpload} name}}}"""
+        clusterQuery = """query RadarClusterListQuery {radarClusterConnection {nodes {lambdaConfig {clusterId enableAutomaticFmdUpload} name} pageInfo {startCursor endCursor hasNextPage hasPreviousPage}}}"""
         CDM_JSON_BODY = {
         "query": clusterQuery
         }
