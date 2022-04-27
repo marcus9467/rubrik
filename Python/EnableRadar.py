@@ -86,7 +86,11 @@ if __name__ == '__main__':
                 clusterName = x['name']
                 clusterId = x['lambdaConfig']['clusterId']
                 RadarEnabled = x['lambdaConfig']['enableAutomaticFmdUpload']
-            except:
+            except Exception as e:
+                print("Exception detected on ")
+                print(x)
+                print(e)
+                print("Continuing with the remaining clusters in the list for now.")
                 continue
             if bool(RadarEnabled) == True:
                 print("Radar is already enabled on cluster " + clusterName + " Skipping this one for now.")
