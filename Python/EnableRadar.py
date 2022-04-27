@@ -26,7 +26,7 @@ def parseArguments():
     parser.add_argument('--username', dest='username', help='specify the username for login')
     #parser.add_argument('--password', dest='password', help='specify the password to login')
     parser.add_argument('--PolarisURL', dest='PolarisURL', help='specify the polaris URL to login')
-    parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
+    parser.add_argument('--allClusters', help='Enable Radar on all known CDM clusters', action="store_true")
     args = parser.parse_args()
     return args
 
@@ -37,6 +37,8 @@ if __name__ == '__main__':
     password = getpass.getpass()
     PolarisURL = args.PolarisURL
     clusterUUID = args.clusterUUID
+    allClusters = args.allClusters
+
     
     #Setup auth session 
     session_url = PolarisURL + "/api/session"
@@ -55,7 +57,6 @@ if __name__ == '__main__':
     json=payload,
     headers=headers,
     )
-    #request = requests.post(session_url, json=payload, headers=headers, verify=False)
     del payload
     response_json = request.json()
     #print(response_json) 
@@ -72,20 +73,48 @@ if __name__ == '__main__':
     'Authorization':PolarisToken
     }
 
-    mutation = """mutation EnableAutomaticFmdUpload($clusterUuid: UUID!, $enabled: Boolean!) {
-  enableAutomaticFmdUpload(clusterUuid: $clusterUuid, enabled: $enabled) {
-    clusterId
-    enabled
-  }
-}"""
-    variables = {}
-    variables['enabled'] = True
-    variables['clusterUuid'] = clusterUUID
+    if bool(allClusters) == True:
+        print("Gathering all known cluster UUIDs to enable with Radar")
+        clusterQuery = """query RadarClusterListQuery {radarClusterConnection {nodes {lambdaConfig {clusterId enableAutomaticFmdUpload} name}}}"""
+        CDM_JSON_BODY = {
+        "query": clusterQuery
+        }
+        clusterResponse = requests.post(PolarisUri, json=CDM_JSON_BODY, headers=PolarisHeaders)
+        clusterlist = clusterResponse.json()['data']['radarClusterConnection']['nodes']
+        for x in clusterlist:
+            try:
+                clusterName = x['name']
+                clusterId = x['lambdaConfig']['clusterId']
+                RadarEnabled = x['lambdaConfig']['enableAutomaticFmdUpload']
+            except:
+                continue
+            if bool(RadarEnabled) == True:
+                print("Radar is already enabled on cluster " + clusterName + " Skipping this one for now.")
+            if bool(RadarEnabled) == False:
+                print("Enabling Radar on  " + clusterName + ".")
+                mutation = """mutation EnableAutomaticFmdUpload($clusterUuid: UUID!, $enabled: Boolean!) {enableAutomaticFmdUpload(clusterUuid: $clusterUuid, enabled: $enabled) {clusterId enabled}}"""
+                variables = {}
+                variables['enabled'] = True
+                variables['clusterUuid'] = clusterId
+                JSON_BODY = {
+                    "query": mutation,
+                    "variables": variables
+                }
+                PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
+                Result = PolarisQuery.json()
+                print(Result)
+#End all clusters loop
 
-    JSON_BODY = {
-        "query": mutation,
-        "variables": variables
-    }
-    PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
-    Result = PolarisQuery.json()
-    print(Result)
+    if bool(allClusters) == False:
+        mutation = """mutation EnableAutomaticFmdUpload($clusterUuid: UUID!, $enabled: Boolean!) {enableAutomaticFmdUpload(clusterUuid: $clusterUuid, enabled: $enabled) {clusterId enabled}}"""
+        variables = {}
+        variables['enabled'] = True
+        variables['clusterUuid'] = clusterUUID
+
+        JSON_BODY = {
+            "query": mutation,
+            "variables": variables
+        }
+        PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
+        Result = PolarisQuery.json()
+        print(Result)
