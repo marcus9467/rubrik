@@ -158,7 +158,7 @@ if __name__ == '__main__':
         cluster = {}
         cluster['id'] = []
         filters['cluster'] = cluster
-        filters['lastUpdated_gt'] = start_time
+        filters['lastUpdatedGt'] = start_time
         filters['objectName'] = ""
         variables['filters'] = filters
   

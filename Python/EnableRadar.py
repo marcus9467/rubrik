@@ -4,12 +4,25 @@
 """
 Script to enable Radar functionality on a per cluster basis.  
 
-Example:
+Example 1:
 EnableRadarPassword.py --PolarisURL https://testpolaris.my.rubrik.com --username myuser@rubrik.com  --clusterUUID 486a581e-3c5d-47c2-8cd0-9cc294438b87
 Password:
 {'data': {'enableAutomaticFmdUpload': {'clusterId': '486a581e-3c5d-47c2-8cd0-9cc294438b87', 'enabled': True}}}
 
 Enables Radar functionality on cluster 486a581e-3c5d-47c2-8cd0-9cc294438b87
+
+Example 2:
+python3 EnableRadar.py --PolarisURL https://testpolaris.my.rubrik.com --username myuser@rubrik.com  --allClusters
+Password:
+Gathering all known cluster UUIDs to enable with Radar
+Radar is already enabled on cluster demo-cc Skipping this one for now.
+Radar is already enabled on cluster perfpod-cdm05 Skipping this one for now.
+Radar is already enabled on cluster perfpod-cdm04 Skipping this one for now.
+Radar is already enabled on cluster perfpod-cdm03 Skipping this one for now.
+Radar is already enabled on cluster perfpod-cdm02 Skipping this one for now.
+Radar is already enabled on cluster perfpod-cdm01 Skipping this one for now.
+
+Checks all CDM clusters known by this Polaris instance and turns on Radar where it isn't on. 
 
 CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
