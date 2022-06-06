@@ -6,6 +6,9 @@ Because this script pulls all of the snapshot data for each object specified it 
 
 If you are unsure of what objects exist in the environment simply specify the all object flag (AllObjects) and the script will check.  
 
+CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
 .EXAMPLE
 
 .\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress 10.35.18.192 -VMware -IncludeAll                                                                            
