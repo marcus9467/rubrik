@@ -13,7 +13,6 @@ import os
 import pprint
 import requests
 import numpy as np
-#import pandas as pd
 
 requests.packages.urllib3.disable_warnings()
 pp = pprint.PrettyPrinter(indent=4)
@@ -21,16 +20,23 @@ pp = pprint.PrettyPrinter(indent=4)
 def parseArguments():
     parser = argparse.ArgumentParser(description='Issue Upgrade Requests via Polaris')
     parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
-    parser.add_argument('--sourceClusterUuid', dest='sourceClusterFid', help="sourceClusterFid", default=None)
+    parser.add_argument('--sourceClusterFid', dest='sourceClusterFid', help="sourceClusterFid", default=None)
     parser.add_argument('--targetClusterFid', dest='targetClusterFid', help="targetClusterFid", default=None)
     parser.add_argument('--csvFile', dest='csvFile', help="csv File with VMware configs", default=None)
+    parser.add_argument('--effectiveSLA', dest='effectiveSLA', help="Filter blueprint assignment based on effectiveSLA", default=None)
+    parser.add_argument('--substring', dest='substring', help="Filter blueprint assignment based on VM naming convention", default=None)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = parseArguments()
     json_keyfile = args.json_keyfile
+    substring = args.substring
+    sourceClusterFid = args.sourceClusterFid
+    targetClusterFid = args.targetClusterFid
     #csvFile = args.csvFile
+    #effectiveSLA = args.effectiveSLA
+    
     #isHydrationEnabled = args.RecoveryOptimized
 
 
@@ -190,45 +196,18 @@ if __name__ == '__main__':
     isActiveFilter['field'] = "IS_ACTIVE"
     isActiveFilter['texts'] = ["true"]
     Filter.append(isActiveFilter)
-    effectiveSLAFilter = {}
-    effectiveSLAFilter['field'] = "EFFECTIVE_SLA"
-    effectiveSLAFilter['texts'] = ["d13632f6-b041-5d49-a287-9a8880bca186"]
-    Filter.append(effectiveSLAFilter)
+    """
+    #Optional code to filter based on effective SLA
+    #effectiveSLAFilter = {}
+    #effectiveSLAFilter['field'] = "EFFECTIVE_SLA"
+    #effectiveSLAFilter['texts'] = ["effectiveSLA"]
+    """
+    #Filter.append(effectiveSLAFilter)
     VMvariables['filter'] = Filter
     VMvariables['sortBy'] = "NAME"
     VMvariables['sortOrder'] = "ASC"
     VMvariablesJSON = json.dumps(VMvariables)
-    #VMvariables = """{
-    #    "first": 1000,
-    #    "filter": [
-    #      {
-    #        "field": "IS_RELIC",
-    #        "texts": [
-    #          "false"
-    #        ]
-    #      },
-    #      {
-    #        "field": "IS_REPLICATED",
-    #        "texts": [
-    #          "false"
-    #        ]
-    #      },
-    #      {
-    #        "field": "IS_ACTIVE",
-    #        "texts": [
-    #          "true"
-    #        ]
-    #      },
-    #      {
-    #        "field": "EFFECTIVE_SLA",
-    #        "texts": [
-    #          "d13632f6-b041-5d49-a287-9a8880bca186"
-    #        ]
-    #      }
-    #    ],
-    #    "sortBy": "NAME",
-    #    "sortOrder": "ASC"
-    #}"""
+
     JSON_BODY = {
     "query": query,
     "variables": VMvariablesJSON
@@ -236,7 +215,11 @@ if __name__ == '__main__':
     PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
     pageInfo = (PolarisQuery.json())['data']['vSphereVmNewConnection']['pageInfo']
     VMMasterList = []
-    VMMasterList.append((PolarisQuery.json())['data']['vSphereVmNewConnection']['edges'])
+
+    ShortList = PolarisQuery.json()['data']['vSphereVmNewConnection']['edges']
+    for x in ShortList:
+        if substring in x['node']['name']:
+            VMMasterList.append(x)
     while(pageInfo['hasNextPage'] == True):
         afterFilter = pageInfo['endCursor']
         NewVariables = VMvariables
@@ -247,13 +230,22 @@ if __name__ == '__main__':
         "variables": VMvariablesJSON
         }
         PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
-        VMMasterList.append((PolarisQuery.json())['data']['vSphereVmNewConnection']['edges'])
+        ShortList = PolarisQuery.json()['data']['vSphereVmNewConnection']['edges']
+        for x in ShortList:
+            if substring in x['node']['name']:
+                VMMasterList.append(x)
+        #VMMasterList.append((PolarisQuery.json())['data']['vSphereVmNewConnection']['edges'])
         pageInfo = (PolarisQuery.json())['data']['vSphereVmNewConnection']['pageInfo']
+    FilterList = []
 
-    #{'startCursor': 'Y3Vyc29yOmludDow', 'endCursor': 'Y3Vyc29yOmludDo5OQ==', 'hasNextPage': True, 'hasPreviousPage': False}
-    #VMMasterList = (PolarisQuery.json())['data']['vSphereVmNewConnection']['edges']
+    #correct for this maybe use an arg to pass source cluster instead. 
+    clusterName = "perfpod-cdm02"
+    for x in VMMasterList:
+        if clusterName in x['node']['cluster']['name']:
+            FilterList.append(x)
+
     #Split Master List into 4 groups
-    MasterList = np.array_split(VMMasterList, 4)
+    MasterList = np.array_split(FilterList, 4)
     ScaleName = 0
     for VMList in MasterList:
         #VMList =  VMList[0]
@@ -265,8 +257,8 @@ if __name__ == '__main__':
         baseName = "ScaleTest"
         BluePrintName = baseName + ScaleNameStr
         variables['name'] = BluePrintName
-        variables['sourceLocationId'] = "39b92c18-d897-4b55-a7f9-17ff178616d0"
-        variables['targetLocationId'] = "3bc43be7-00ca-4ed8-ba13-cef249d337fa"
+        variables['sourceLocationId'] = sourceClusterFid
+        variables['targetLocationId'] = targetClusterFid
         children = []
         for VM in VMList:
             childarray = {}
@@ -338,7 +330,7 @@ if __name__ == '__main__':
             vSphereSpec['volumes'] = volumes
             nics = []
             nicsArray = {"isPrimaryNic": True, "key": "4000", "networkType": "DHCP", "networkId": "c0262fde-dd5a-50c7-919c-eb85109dc97c"}
-            if(count < 100):
+            if(BluePrintName == "ScaleTest0"):
                 nicsArray = {"isPrimaryNic": True, "key": "4000", "networkType": "DHCP", "networkId": "c2965024-e8a9-564b-b584-07d6ca3926af"}
             nics.append(nicsArray)
             vSphereSpec['nics'] = nics
