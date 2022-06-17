@@ -63,7 +63,7 @@ PowerShell credential request
 Enter your credentials.
 Password for user admin: *********
 
-This will run the script and have it look at only the VMware VM with ID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579. By supplying the -StorageStats flag this will also calculate storage space use on a per snapshot level for this individual object. It is suggested that -StorageStats only be used against a single object at a time due to how resource intensive the storage calculation can be.
+This will run the script and have it look at only the VMware VM with ID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579. By supplying the -StorageStats flag this will also calculate storage space use on a per snapshot level for this individual object. It is suggested that -StorageStats only be used against a single object at a time due to how resource intensive the storage calculation can be. This only calculates storage based on local resources, and should not be used to review archive capacity.
 
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com>
