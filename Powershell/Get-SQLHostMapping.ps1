@@ -26,8 +26,8 @@ param ([cmdletbinding()]
     [parameter(Mandatory=$false)]
     [switch]$ExportToCSV
     )
-#Import-Module -Name Rubrik
-#Connect-Rubrik
+Import-Module -Name Rubrik
+Connect-Rubrik
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
 $clusterInfo = Invoke-RubrikRESTCall -Endpoint "cluster/me" -Method GET
 $clusterId = $clusterInfo.id
