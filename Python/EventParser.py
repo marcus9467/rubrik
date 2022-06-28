@@ -84,7 +84,7 @@ if __name__ == '__main__':
     }
     #Setup syslog forwarding
     socket_type = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM  
-    logger = logging.getLogger('AnomalyParser')
+    logger = logging.getLogger('RSCParser')
     logger.setLevel(logging.DEBUG)
     syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), facility=socket_type)
     formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
@@ -93,7 +93,7 @@ if __name__ == '__main__':
     logger.addHandler(syslog)
 
     def TestConnection():
-          logger.info("This is a test for AnomalyParser")
+          logger.info("This is a test for RSCParser")
     if Test == True:
           print("Sending Test message to", syslogServer)
           TestConnection()
