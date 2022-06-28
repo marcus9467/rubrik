@@ -38,7 +38,7 @@ def parseArguments():
     parser.add_argument('--syslogServer', dest='syslogServer', help='specify the syslog server')
     parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
     parser.add_argument('--test', help='Test connection to Syslog Server', action="store_true")
-    parser.add_argument('--protocol', help='specify protocol type', dest='protocol')
+    parser.add_argument('--protocol', help='specify tcp or udp', dest='protocol')
     parser.add_argument('-p', '--port', dest='syslogPort', type=int, help="Defines the port to use with the syslog server", default=None)
     args = parser.parse_args()
     return args
