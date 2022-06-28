@@ -26,6 +26,7 @@ import os
 import pprint
 import sys
 import time
+import socket
 import requests
 
 requests.packages.urllib3.disable_warnings()
@@ -37,6 +38,7 @@ def parseArguments():
     parser = argparse.ArgumentParser(description='Parse Radar alerts from Polaris and send to syslog')
     parser.add_argument('--syslogServer', dest='syslogServer', help='specify the syslog server')
     parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
+    parser.add_argument('--protocol', help='specify protocol type', dest='protocol')
     parser.add_argument('--test', help='Test connection to Syslog Server', action="store_true")
     parser.add_argument('-p', '--port', dest='syslogPort', type=int, help="Defines the port to use with the syslog server", default=None)
     args = parser.parse_args()
@@ -47,6 +49,7 @@ if __name__ == '__main__':
     syslogServer = args.syslogServer
     json_keyfile = args.json_keyfile
     syslogPort = args.syslogPort
+    protocol = args.protocol
     Test = args.test
     
     token_time = datetime.datetime.utcnow()
@@ -79,10 +82,11 @@ if __name__ == '__main__':
     'Accept':'application/json',
     'Authorization':PolarisToken
     }
-    #Setup syslog forwarding  
+    #Setup syslog forwarding
+    socket_type = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM  
     logger = logging.getLogger('AnomalyParser')
     logger.setLevel(logging.DEBUG)
-    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort))
+    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), facility=socket_type)
     formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
     syslog.setLevel(logging.INFO)
     syslog.setFormatter(formatter)
