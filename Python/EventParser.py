@@ -21,7 +21,7 @@ import argparse
 import datetime
 import json
 import logging
-import logging.handlers
+import logging.handlers as handlers
 import os
 import pprint
 import sys
@@ -45,6 +45,64 @@ def parseArguments():
     return args
 
 if __name__ == '__main__':
+    class SfTcpSyslogHandler(handlers.SysLogHandler):
+        """
+    This class override the python SyslogHandler emit function.
+    It is needed to deal with appending of the nul character to the end of the message when using TCP.
+    Please see: https://stackoverflow.com/questions/40041697/pythons-sysloghandler-and-tcp/40152493#40152493
+    """
+    def __init__(self, message_separator_character, address=('localhost', handlers.SYSLOG_UDP_PORT),
+                 facility=handlers.SysLogHandler.LOG_USER,
+                 socktype=None):
+        """
+        The user of this class must specify the value for the messages separator.
+        :param message_separator_character: The value to separate between messages.
+                                            The recommended value is the "nul character": "\000".
+        :param address: Same as in the super class.
+        :param facility: Same as in the super class.
+        :param socktype: Same as in the super class.
+        """
+        super(SfTcpSyslogHandler, self).__init__(address=address, facility=facility, socktype=socktype)
+
+        self.message_separator_character = message_separator_character
+
+    def emit(self, record):
+        """
+        SFTCP addition:
+        To let the user to choose which message_separator_character to use, we override the emit function.
+        ####
+        Emit a record.
+
+        The record is formatted, and then sent to the syslog server. If
+        exception information is present, it is NOT sent to the server.
+        """
+        try:
+            msg = self.format(record) + self.message_separator_character
+            if self.ident:
+                msg = self.ident + msg
+
+            # We need to convert record level to lowercase, maybe this will
+            # change in the future.
+            prio = '<%d>' % self.encodePriority(self.facility,
+                                                self.mapPriority(record.levelname))
+            prio = prio.encode('utf-8')
+            # Message is a string. Convert to bytes as required by RFC 5424
+            msg = msg.encode('utf-8')
+            msg = prio + msg
+            if self.unixsocket:
+                try:
+                    self.socket.send(msg)
+                except OSError:
+                    self.socket.close()
+                    self._connect_unixsocket(self.address)
+                    self.socket.send(msg)
+            elif self.socktype == socket.SOCK_DGRAM:
+                self.socket.sendto(msg, self.address)
+            else:
+                self.socket.sendall(msg)
+        except Exception:
+            self.handleError(record)
+
     args = parseArguments()
     syslogServer = args.syslogServer
     json_keyfile = args.json_keyfile
@@ -82,12 +140,18 @@ if __name__ == '__main__':
     'Accept':'application/json',
     'Authorization':PolarisToken
     }
+    
     #Setup syslog forwarding
     socket_type = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM  
     logger = logging.getLogger('RSCParser')
     logger.setLevel(logging.DEBUG)
-    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), facility=socket_type)
-    formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
+    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), socktype=socket_type)
+    #formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
+    #if socket_type == socket.SOCK_STREAM:
+    #      formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s\n', datefmt= '%b %d %H:%M:%S')
+    #      logger.append_nul = False
+    formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s\n', datefmt= '%b %d %H:%M:%S')
+    logging.handlers.SysLogHandler.append_nul = False
     syslog.setLevel(logging.INFO)
     syslog.setFormatter(formatter)
     logger.addHandler(syslog)
