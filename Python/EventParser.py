@@ -131,6 +131,7 @@ if __name__ == '__main__':
     if 'access_token' not in response_json:
         print("Authentication failed!")
     access_token = response_json['access_token']
+    
     #Setup token auth for direct graphql queries external to the SDK. 
     POLARIS_URL = session_url.rsplit("/", 1)[0]
     PolarisToken = access_token
@@ -140,16 +141,12 @@ if __name__ == '__main__':
     'Accept':'application/json',
     'Authorization':PolarisToken
     }
-    
+
     #Setup syslog forwarding
     socket_type = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM  
     logger = logging.getLogger('RSCParser')
     logger.setLevel(logging.DEBUG)
     syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), socktype=socket_type)
-    #formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
-    #if socket_type == socket.SOCK_STREAM:
-    #      formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s\n', datefmt= '%b %d %H:%M:%S')
-    #      logger.append_nul = False
     formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s\n', datefmt= '%b %d %H:%M:%S')
     logging.handlers.SysLogHandler.append_nul = False
     syslog.setLevel(logging.INFO)
