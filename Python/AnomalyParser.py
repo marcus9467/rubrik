@@ -21,7 +21,7 @@ import argparse
 import datetime
 import json
 import logging
-import logging.handlers
+import logging.handlers as handlers
 import os
 import pprint
 import sys
