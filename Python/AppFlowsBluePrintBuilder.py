@@ -7,7 +7,9 @@ CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 """
 
 
-
+"""
+This Code revision is currently in progress and is not yet functional. 
+"""
 
 
 import argparse
@@ -41,7 +43,115 @@ if __name__ == '__main__':
     #effectiveSLA = args.effectiveSLA
     
     #isHydrationEnabled = args.RecoveryOptimized
-
+    #Get user defined environment information
+    def UserInput():
+        # Grab relevant host information for this test. 
+        UserProvidedSourcevCenter = input('What is the source vCenter name?\n')
+        UserProvidedTargetvCenter = input('What is the target vCenter name?\n')
+        UserProvidedSourceCdmCluster = input('What is the source CDM cluster name?\n')
+        UserProvidedTargetCdmCluster = input('What is the target CDM cluster name?\n')
+        return UserProvidedSourcevCenter,UserProvidedTargetvCenter,UserProvidedSourceCdmCluster,UserProvidedTargetCdmCluster
+        #To populate the variable a multiple selection into a variable calling the function is required:
+        #Example 
+        #SourcevCenter,TargetvCenter,SourceCdmCluster,TargetCdmCluster = UserInput()
+    
+    #Use the user defined input to map back to resources for Blueprints
+    def GatherRscEnvironmentInfo():
+          #Gather CDM cluster info based on UserInput
+          print("Gathering environment info based on user provided data.")
+          query = """query DataSitesMapQuery {
+                      clusterConnection(filter: {type: []}) {
+                        nodes {
+                          id
+                          name
+                          version
+                          estimatedRunway      
+                          status
+                          connectivityLastUpdated
+                          type
+                        }
+                      }
+                    }"""
+          JSON_BODY = {"query": query}
+          PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
+          ClusterInfo = PolarisQuery.json()['data']['clusterConnection']['nodes']
+          for cluster in ClusterInfo:
+                #Map the overall cluster information back to a variable based on user input
+                if cluster['name'] in UserProvidedSourceCdmCluster:
+                      SourceCdmCluster = cluster
+                if cluster['name'] in UserProvidedTargetCdmCluster:
+                      TargetCdmCluster = cluster
+          
+          #Gather vCenter info from user inputs
+          query = """query VCenterListQuery($first: Int!, $after: String, $filter: [Filter!]!, $sortBy: HierarchySortByField, $sortOrder: HierarchySortOrder) {
+                       vSphereVCenterConnection(filter: $filter, first: $first, after: $after, sortBy: $sortBy, sortOrder: $sortOrder) {
+                         edges {
+                           node {
+                             id
+                             ...HierarchyObjectNameColumnFragment
+                             ...CdmClusterColumnFragment
+                             ...VCenterStatusFragment
+                             lastRefreshTime
+                             aboutInfo {
+                               version
+                             }
+                             isVmc
+                           }
+                         }
+                         pageInfo {
+                           startCursor
+                           endCursor
+                           hasNextPage
+                           hasPreviousPage
+                         }
+                       }
+                     }
+                     
+                     fragment HierarchyObjectNameColumnFragment on HierarchyObject {
+                       name
+                     }
+                     
+                     fragment CdmClusterColumnFragment on CdmHierarchyObject {
+                       replicatedObjectCount
+                       cluster {
+                         id
+                         name
+                         version
+                         status
+                       }
+                     }
+                     
+                     fragment VCenterStatusFragment on VSphereVCenter {
+                       id
+                       lastRefreshTime
+                       connectionStatus {
+                         status
+                         message
+                       }
+                     }"""
+          
+          #Filter for Source vCenter Details
+          variables ={"first":50,"filter":[{"field":"IS_RELIC","texts":["false"]},{"field":"IS_REPLICATED","texts":["false"]},{"field":"CLUSTER_ID","texts":[SourceCdmCluster['id']]}],"sortBy":"NAME","sortOrder":"ASC"}
+          variablesJson = json.dumps(variables)
+          JSON_BODY = {"query": query,"variables": variablesJson}
+          PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
+          SourceClustervCenters = PolarisQuery.json()['data']['vSphereVCenterConnection']['edges']
+          for vCenter in SourceClustervCenters:
+                #Map the overall vCenter information back to a variable based on user input
+                if  UserProvidedSourcevCenter in vCenter['node']['name']:
+                  SourcevCenter = vCenter['node']
+          
+          #Filter for Target vCenter Details
+          variables ={"first":50,"filter":[{"field":"IS_RELIC","texts":["false"]},{"field":"IS_REPLICATED","texts":["false"]},{"field":"CLUSTER_ID","texts":[TargetCdmCluster['id']]}],"sortBy":"NAME","sortOrder":"ASC"}
+          variablesJson = json.dumps(variables)
+          JSON_BODY = {"query": query,"variables": variablesJson}
+          PolarisQuery = requests.post(PolarisUri, json=JSON_BODY, headers=PolarisHeaders)
+          TargetClustervCenters = PolarisQuery.json()['data']['vSphereVCenterConnection']['edges']
+          for vCenter in TargetClustervCenters:
+                #Map the overall vCenter information back to a variable based on user input
+                if  UserProvidedTargetvCenter in vCenter['node']['name']:
+                      TargetvCenter = vCenter['node']
+          
 
     #Setup token auth 
     json_file = open(json_keyfile)
