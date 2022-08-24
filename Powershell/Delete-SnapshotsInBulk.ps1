@@ -5,12 +5,12 @@ This script makes the assumption that the CSV being provided has the headers "Sn
 CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 .EXAMPLE
-Delete-SnapshotsInBulk.ps1 -filename SnapsToDelete.csv
+Delete-SnapshotsInBulk.ps1 -file_name SnapsToDelete.csv
 
 This will delete all the snapshots specified in the CSV file for all data locations
 
 .EXAMPLE
-Delete-SnapshotsInBulk.ps1 -filename SnapsToDelete.csv -locationId 34c6173f-3892-45fb-8713-81a3369f6eb6
+Delete-SnapshotsInBulk.ps1 -file_name SnapsToDelete.csv -locationId 34c6173f-3892-45fb-8713-81a3369f6eb6
 
 This will delete all the snapshots specified in the CSV file for just data location 34c6173f-3892-45fb-8713-81a3369f6eb6. 
 
