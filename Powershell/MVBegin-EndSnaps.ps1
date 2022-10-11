@@ -18,6 +18,25 @@ $rubrikAddress = "Put IP here"
 $MV_ID = "Put MV ID HERE"
 $token = "Put Token Here"
 
+#Setup the script to be able to ignore self signed certificate errors
+try {
+    add-type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAllCertsPolicy : ICertificatePolicy {
+    public bool CheckValidationResult(
+        ServicePoint srvPoint, X509Certificate certificate,
+        WebRequest request, int certificateProblem) {
+        return true;
+    }
+}
+"@}
+
+catch 
+    {
+    Write-Output "Trust cert policy already set"
+    }
+
 #Bypass self-signed certificate check issue
 $AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12'
 [System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols
