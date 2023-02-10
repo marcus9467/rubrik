@@ -2,15 +2,15 @@
 
 
 """
-Script to parse high confidence ransomware alerts from Polaris directly. In the event an anomaly is detected a syslog message is sent to the specified syslog server. 
+Script to parse high confidence ransomware alerts from Polaris directly. In the event an event is detected a syslog message is sent to the specified syslog server. 
 
 Example:
-python3 AnomalyParser.py --keyfile SampleKeyFile.json --syslogServer syslogserver.rubrik.com --port 514 
+python3 EventParser.py --keyfile SampleKeyFile.json --syslogServer syslogserver.rubrik.com --port 514 
 
-Starts monitoring the specified Polaris instance for anomaly events and sends them to the syslog server specified over port 514. 
+Starts monitoring the specified Polaris instance for events and sends them to the syslog server specified over port 514. 
 
 Example:
-python3 AnomalyParser.py --keyfile SampleKeyFile.json --syslogServer syslogserver.rubrik.com --port 514 --test
+python3 EventParser.py --keyfile SampleKeyFile.json --syslogServer syslogserver.rubrik.com --port 514 --test
 
 Sends a test message to the specified syslog server over port 514 to validate communication.
 
@@ -26,7 +26,6 @@ import os
 import pprint
 import sys
 import time
-import socket
 import requests
 
 requests.packages.urllib3.disable_warnings()
@@ -38,8 +37,8 @@ def parseArguments():
     parser = argparse.ArgumentParser(description='Parse Radar alerts from Polaris and send to syslog')
     parser.add_argument('--syslogServer', dest='syslogServer', help='specify the syslog server')
     parser.add_argument('-k', '--keyfile', dest='json_keyfile', help="Polaris JSON Keyfile", default=None)
-    parser.add_argument('--protocol', help='specify tcp or udp', dest='protocol')
     parser.add_argument('--test', help='Test connection to Syslog Server', action="store_true")
+    parser.add_argument('--protocol', help='specify tcp or udp', dest='protocol')
     parser.add_argument('-p', '--port', dest='syslogPort', type=int, help="Defines the port to use with the syslog server", default=None)
     args = parser.parse_args()
     return args
@@ -72,7 +71,6 @@ if __name__ == '__main__':
         To let the user to choose which message_separator_character to use, we override the emit function.
         ####
         Emit a record.
-
         The record is formatted, and then sent to the syslog server. If
         exception information is present, it is NOT sent to the server.
         """
@@ -102,12 +100,10 @@ if __name__ == '__main__':
                 self.socket.sendall(msg)
         except Exception:
             self.handleError(record)
-
     args = parseArguments()
     syslogServer = args.syslogServer
     json_keyfile = args.json_keyfile
     syslogPort = args.syslogPort
-    protocol = args.protocol
     Test = args.test
     
     token_time = datetime.datetime.utcnow()
@@ -131,7 +127,6 @@ if __name__ == '__main__':
     if 'access_token' not in response_json:
         print("Authentication failed!")
     access_token = response_json['access_token']
-    
     #Setup token auth for direct graphql queries external to the SDK. 
     POLARIS_URL = session_url.rsplit("/", 1)[0]
     PolarisToken = access_token
@@ -141,20 +136,17 @@ if __name__ == '__main__':
     'Accept':'application/json',
     'Authorization':PolarisToken
     }
-
-    #Setup syslog forwarding
-    socket_type = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM  
-    logger = logging.getLogger('RSCParser')
+    #Setup syslog forwarding  
+    logger = logging.getLogger('AnomalyParser')
     logger.setLevel(logging.DEBUG)
-    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort), socktype=socket_type)
-    formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s\n', datefmt= '%b %d %H:%M:%S')
-    logging.handlers.SysLogHandler.append_nul = False
+    syslog = logging.handlers.SysLogHandler(address=(syslogServer, syslogPort))
+    formatter = logging.Formatter('%(asctime)s rbk-log: %(levelname)s[%(name)s] %(message)s', datefmt= '%b %d %H:%M:%S')
     syslog.setLevel(logging.INFO)
     syslog.setFormatter(formatter)
     logger.addHandler(syslog)
 
     def TestConnection():
-          logger.info("This is a test for RSCParser")
+          logger.info("This is a test for AnomalyParser")
     if Test == True:
           print("Sending Test message to", syslogServer)
           TestConnection()
@@ -220,14 +212,14 @@ if __name__ == '__main__':
         filters['lastActivityStatus'] = []
         filters['lastActivityType'] = []
         filters['severity'] = []
-        cluster = {}
-        cluster['id'] = []
-        filters['cluster'] = cluster
-        filters['lastUpdatedGt'] = start_time
+        #cluster = {}
+        #cluster['id'] = []
+        filters['clusterId'] = []
+        filters['lastUpdatedTimeGt'] = start_time
         filters['objectName'] = ""
         variables['filters'] = filters
-  
-        query = """query EventSeriesListQuery($after: String, $filters: ActivitySeriesFilterInput, $first: Int, $sortBy: ActivitySeriesSortByEnum, $sortOrder: SortOrderEnum) {
+
+        query = """query EventSeriesListQuery($after: String, $filters: ActivitySeriesFilter, $first: Int, $sortBy: ActivitySeriesSortField, $sortOrder: SortOrder) {
           activitySeriesConnection(after: $after, first: $first, filters: $filters, sortBy: $sortBy, sortOrder: $sortOrder) {
             edges {
               cursor
@@ -236,6 +228,7 @@ if __name__ == '__main__':
                 cluster {
                   id
                   name
+                  timezone
                 }
                 activityConnection(first: 1) {
                   nodes {
@@ -252,7 +245,7 @@ if __name__ == '__main__':
             }
           }
         }
-        
+
         fragment EventSeriesFragment on ActivitySeries {
           id
           fid
@@ -267,6 +260,14 @@ if __name__ == '__main__':
           progress
           isCancelable
           isPolarisEventSeries
+          location
+          effectiveThroughput
+          dataTransferred
+          logicalSize
+          organizations {
+            id
+            name
+          }
         }"""
   
         JSON_BODY = {
