@@ -21,18 +21,6 @@ This will generate a list of objects and their compliance status over the last 7
 
 #>
 
-
-
-<#
-
-Features to Add:
-Filtering based on cluster
-
-Add in summary view of backups 
-
-
-#>
-
 [cmdletbinding()]
 param (
     [parameter(Mandatory=$true)]
