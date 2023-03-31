@@ -1,35 +1,23 @@
 <#
 
 .SYNOPSIS
-This script will extract compliance and snapshot information for all CDM clusters in a given RSC environment. 
+This script will extract compliance and snapshot information for all CDM clusters in a given RSC environment. Filters are available for both clusters and slas. 
 
 .EXAMPLE
-./ChristmasTreeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport 7
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report.
 
 
 .EXAMPLE
-./ChristmasTreeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport 7 -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the clusterUUIDs specified 
 
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
-    Created : March 22, 2023
+    Created : March 30, 2023
     Company : Rubrik Inc
-
-#>
-
-
-
-<#
-
-Features to Add:
-Filtering based on cluster
-
-Add in summary view of backups 
-
 
 #>
 
@@ -38,11 +26,42 @@ param (
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
     [parameter(Mandatory=$true)]
+    [ValidateSet("PAST_365_DAYS","PAST_90_DAYS","PAST_30_DAYS","PAST_7_DAYS","LAST_24_HOURS")]
     [string]$daysToReport,
     [parameter(Mandatory=$false)]
-    [string]$ClusterId
-
+    [string]$ClusterId = "[]",
+    [parameter(Mandatory=$false)]
+    [string]$SlaIds
 )
+
+
+<#
+TO DO
+
+Add in SLA filtering Functions
+Example Filter:
+{
+  "first": 50,
+  "filter": {
+    "complianceStatus": [
+      "IN_COMPLIANCE",
+      "OUT_OF_COMPLIANCE",
+      "NOT_AVAILABLE"
+    ],
+    "protectionStatus": [],
+    "slaDomain": {
+      "id": [
+        "09425d87-40fa-4903-8a4a-3fc9677e044f"
+      ]
+    },
+    "slaTimeRange": "SINCE_PROTECTION",
+    "orgId": []
+  },
+  "sortBy": "Name",
+  "sortOrder": "ASC"
+}
+#>
+
 
 ##################################
 
@@ -484,61 +503,19 @@ function Get-ProtectionTaskDetails{
     }
 }
 function get-info{
-
-    # Test Query
-
     process {
 
         try {
 
-          <#
-          {
-  "first": 50,
-  "filter": {
-    "cluster": {
-      "id": [
-        "3bc43be7-00ca-4ed8-ba13-cef249d337fa",
-        "39b92c18-d897-4b55-a7f9-17ff178616d0"
-      ]
-    },
-    "complianceStatus": [
-      "IN_COMPLIANCE",
-      "OUT_OF_COMPLIANCE",
-      "NOT_AVAILABLE"
-    ],
-    "protectionStatus": [],
-    "slaTimeRange": "SINCE_PROTECTION",
-    "orgId": []
-  },
-  "sortBy": "Name",
-  "sortOrder": "ASC"
-}
-          #>
-          if(!($ClusterId)) {
-            Write-Host "Gathering Compliance Info for all clusters"
-            $variables = "{
-              `"first`": 200,
-              `"filter`": {
-                `"complianceStatus`": [
-                  `"IN_COMPLIANCE`",
-                  `"OUT_OF_COMPLIANCE`",
-                  `"NOT_AVAILABLE`"
-                ],
-                `"protectionStatus`": [],
-                `"slaTimeRange`": `"PAST_7_DAYS`",
-                `"orgId`": []
-              },
-              `"sortBy`": `"Name`",
-              `"sortOrder`": `"ASC`"
-            }"
-          }
-          if($ClusterId) {
-            #$ClusterId = $clusterId -replace '/s', ''
-            $ClusterId = $ClusterId.Split(",")
-            $ClusterId = $ClusterId | ConvertTo-Json
-            #Fix Multicluster
-            #Also not populating HTML files
-            Write-Host ("Gathering Compliance Info for clusters " + $clusterId)
+          #if(!($ClusterId)) {
+          #  $ClusterId = $ClusterId.Split(",")
+          #  $ClusterId = $ClusterId | ConvertTo-Json
+          #}
+
+
+
+          if(!($SlaIDs)){
+            #Blank SLAs filter results in NO RESULTS
             $variables = "{
               `"first`": 200,
               `"filter`": {
@@ -551,14 +528,67 @@ function get-info{
                   `"NOT_AVAILABLE`"
                 ],
                 `"protectionStatus`": [],
-                `"slaTimeRange`": `"PAST_7_DAYS`",
+                `"slaTimeRange`": `"${daysToReport}`",
                 `"orgId`": []
               },
               `"sortBy`": `"Name`",
               `"sortOrder`": `"ASC`"
             }"
           }
-   
+          if($SlaIDs){
+            #Need to address parsing SLAIDs single vs multiple
+
+            $SlaIDs = $SlaIDs.Split(",")
+            $SlaIDs = $SlaIDs | ConvertTo-Json
+            $variables = "{
+              `"first`": 200,
+              `"filter`": {
+                `"cluster`": {
+                  `"id`": $clusterId
+                },
+                `"complianceStatus`": [
+                  `"IN_COMPLIANCE`",
+                  `"OUT_OF_COMPLIANCE`",
+                  `"NOT_AVAILABLE`"
+                ],
+                `"protectionStatus`": [],
+                `"slaDomain`": {
+                  `"id`": $SlaIDs
+                  },  
+                `"slaTimeRange`": `"${daysToReport}`",
+                `"orgId`": []
+              },
+              `"sortBy`": `"Name`",
+              `"sortOrder`": `"ASC`"
+            }"
+          }
+            <#
+              $variables = "{
+              `"first`": 200,
+              `"filter`": {
+                `"cluster`": {
+                  `"id`": $clusterId
+                },
+                `"complianceStatus`": [
+                  `"IN_COMPLIANCE`",
+                  `"OUT_OF_COMPLIANCE`",
+                  `"NOT_AVAILABLE`"
+                ],
+                `"protectionStatus`": [],
+                `"slaDomain`": {
+                  `"id`": $SlaIDs
+                  }     
+                `"slaTimeRange`": `"PAST_7_DAYS`",
+                `"orgId`": []
+              },
+              `"sortBy`": `"Name`",
+              `"sortOrder`": `"ASC`"
+            }"
+            #>
+            if($ClusterId -ne "[]") {
+              Write-Host ("Gathering Compliance Info for clusters " + $clusterId)
+            }
+            
 
             $query = "query ComplianceTableQuery(`$first: Int!, `$filter: SnappableFilterInput, `$after: String, `$sortBy: SnappableSortByEnum, `$sortOrder: SortOrder) {
                 snappableConnection(first: `$first, filter: `$filter, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
@@ -623,26 +653,8 @@ function get-info{
             while ((((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).hasNextPage -eq $true){
                 $endCursor = (((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).endCursor
                 Write-Host ("Looking at End Cursor " + $endCursor)
-                if(!($ClusterId)) {
-                  $variables =  $variables = "{
-                    `"first`": 200,
-                    `"filter`": {
-                      `"complianceStatus`": [
-                        `"IN_COMPLIANCE`",
-                        `"OUT_OF_COMPLIANCE`",
-                        `"NOT_AVAILABLE`"
-                      ],
-                      `"protectionStatus`": [],
-                      `"slaTimeRange`": `"PAST_7_DAYS`",
-                      `"orgId`": []
-                    },
-                    `"sortBy`": `"Name`",
-                    `"sortOrder`": `"ASC`",
-                    `"after`": `"${endCursor}`"
-                  }"
-                }
-                if($ClusterId) {
-                  $variables =  $variables = "{
+                if(!($SlaIDs)){
+                  $variables = "{
                     `"first`": 200,
                     `"filter`": {
                       `"cluster`": {
@@ -654,7 +666,7 @@ function get-info{
                         `"NOT_AVAILABLE`"
                       ],
                       `"protectionStatus`": [],
-                      `"slaTimeRange`": `"PAST_7_DAYS`",
+                      `"slaTimeRange`": `"${daysToReport}`",
                       `"orgId`": []
                     },
                     `"sortBy`": `"Name`",
@@ -662,7 +674,30 @@ function get-info{
                     `"after`": `"${endCursor}`"
                   }"
                 }
-
+                if($SlaIDs){
+                  $variables = "{
+                    `"first`": 200,
+                    `"filter`": {
+                      `"cluster`": {
+                        `"id`": $clusterId
+                      },
+                      `"complianceStatus`": [
+                        `"IN_COMPLIANCE`",
+                        `"OUT_OF_COMPLIANCE`",
+                        `"NOT_AVAILABLE`"
+                      ],
+                      `"protectionStatus`": [],
+                      `"slaDomain`": {
+                        `"id`": $SlaIDs
+                        },  
+                      `"slaTimeRange`": `"${daysToReport}`",
+                      `"orgId`": []
+                    },
+                    `"sortBy`": `"Name`",
+                    `"sortOrder`": `"ASC`",
+                    `"after`": `"${endCursor}`"
+                  }"
+                }
                 $JSON_BODY = @{
                     "variables" = $variables
                     "query" = $query
@@ -934,7 +969,25 @@ Function Get-DateRange{
 #Set Timeframe to scan based on $DaysToReport
 $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
 $currentDate = Get-Date -Format $InFormat 
-$startDate = ($currentDate | Get-Date).AddDays("-" + $daysToReport) | Get-Date -Format $InFormat
+if($daysToReport){
+  if($daysToReport -match "PAST_365_DAYS"){
+    $actualDaysToReport = 365
+  }
+  if($daysToReport -match "PAST_90_DAYS"){
+    $actualDaysToReport = 90
+  }
+  if($daysToReport -match "PAST_30_DAYS"){
+    $actualDaysToReport = 30
+  }
+  if($daysToReport -match "PAST_7_DAYS"){
+    $actualDaysToReport = 7
+  }
+  if($daysToReport -match "LAST_24_HOURS"){
+    $actualDaysToReport = 1
+  }
+
+}
+$startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
 
 #$daysToReport = 7
 $polSession = connect-polaris
@@ -955,7 +1008,6 @@ $R2SLACount = $R2 | Select-Object SLAID -Unique | Measure-Object | Select-Object
 
 # Totals
 $TotalBackups = $R2 | Select-Object -ExpandProperty totalSnapshots | Measure-Object -Sum | Select-Object -ExpandProperty Sum
-
 $TotalStrikes = $R2 | Select-Object -ExpandProperty missedSnapshots | Measure-Object -Sum | Select-Object -ExpandProperty Sum
 
 $SummaryInfo = New-Object PSobject
@@ -964,14 +1016,6 @@ $SummaryInfo | Add-Member -NotePropertyName "ClusterCount" -NotePropertyValue $R
 $SummaryInfo | Add-Member -NotePropertyName "SLACount" -NotePropertyValue $R2SLACount
 $SummaryInfo | Add-Member -NotePropertyName "TotalBackupsCount" -NotePropertyValue $TotalBackups
 $SummaryInfo | Add-Member -NotePropertyName "TotalMissedBackupCount" -NotePropertyValue $TotalStrikes
-
-# Averages
-
-#$ObjectAverageHoursSince = $ObjectCompliance | Select -ExpandProperty HoursSince | Measure -Average | Select -ExpandProperty Average
-
-#$ObjectAverageHoursSince = [Math]::Round($ObjectAverageHoursSince, 2)
-
-# Objects
 
 #Get Range of Dates Specified and setup table for html function later. 
 $dateArray = Get-DateRange $startDate $currentDate
@@ -982,7 +1026,6 @@ ForEach($day in $dateArray){
 }
 
 $dateFormattedReportTemplate = New-Object PSobject
-#$dateFormattedReportTemplate | Add-Member -NotePropertyName "ObjectName" -NotePropertyValue ""
 foreach($date in $dateReportTemplate){$dateFormattedReportTemplate | Add-Member -NotePropertyName $date -NotePropertyValue 1}
 
 #Add in the DateRangeTemplate to Objects
@@ -991,8 +1034,6 @@ ForEach($object in $R2){
 }
 
 $ObjectsWithStrikes = $R2 | Where-Object {$_.missedSnapshots -gt 0} | Measure-Object | Select-Object -ExpandProperty Count
-$objectsWithStrikesInfo = $R2 | Where-Object {$_.missedSnapshots -gt 0}
-#$objectsWithoutStrikesInfo = $R2 | Where-Object {$_.missedSnapshots -eq 0}
 $ObjectsWithoutStrikes = $R2 | Where-Object {$_.missedSnapshots -eq 0} | Measure-Object | Select-Object -ExpandProperty Count
 
 $SummaryInfo | Add-Member -NotePropertyName "OutOfComplianceObjects" -NotePropertyValue $ObjectsWithStrikes
@@ -1081,6 +1122,6 @@ $FinishedData = $HTMLData | ForEach-Object{
 $HTMLSummary = $SummaryInfo |ConvertTo-Html -Head $HtmlHead
 $completedReport = $HTMLSummary + $FinishedData
 #Wait-Debugger
-Write-Host ("Writing report file to "  + $Output_directory + "/ChristmasTreeReport-" +$mdate + ".html")
-$completedReport | Out-File ($Output_directory + "/ChristmasTreeReport-" +$mdate + ".html")
+Write-Host ("Writing report file to "  + $Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
+$completedReport | Out-File ($Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
 disconnect-polaris
