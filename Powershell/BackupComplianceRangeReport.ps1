@@ -14,9 +14,17 @@ This will generate a list of objects and their compliance status over the last 7
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the clusterUUIDs specified 
 
+
+.EXAMPLE
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
+
+This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the SLAIDs specified. The SLAIDs can either be the local CDM IDs, or the global RSC FIDs
+
+
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
+    Last Edit: April 11, 2023
     Company : Rubrik Inc
 
 #>
@@ -383,7 +391,7 @@ function Get-ProtectionTaskDetails{
         #Set Timeframe to scan based on $DaysToReport
         $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
         $currentDate = Get-Date -Format $InFormat 
-        $startDate = ($currentDate | Get-Date).AddDays("-" + $daysToReport) | Get-Date -Format $InFormat
+        $startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
         $protectionTaskDetailsData = @()
 
         <#
@@ -646,10 +654,11 @@ function get-info{
                 "query" = $query
             }
             $JSON_BODY = $JSON_BODY | ConvertTo-Json
-
+            
             $snappableInfo = @()
             $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
             $snappableInfo += (((($info.content |ConvertFrom-Json).data).snappableConnection).edges).node
+            
             while ((((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).hasNextPage -eq $true){
                 $endCursor = (((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).endCursor
                 Write-Host ("Looking at End Cursor " + $endCursor)
