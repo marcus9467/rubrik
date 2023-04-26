@@ -320,9 +320,9 @@ if($SingleObject){
                     $snapshot_stats.Contributing_to_Replication_Lag = "TRUE"
                 }
             }
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -415,9 +415,9 @@ if($SingleObject){
                 }
             }
 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -547,9 +547,9 @@ if($SingleObject){
 
                         #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
                       #  if(-not [string]::IsNullOrEmpty($SLA.archivalSpecs)){
-                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                             $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                             $now = Get-date
                             #Wait-Debugger
                             $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
@@ -661,9 +661,9 @@ if($SingleObject){
 
                         #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
                       #  if(-not [string]::IsNullOrEmpty($SLA.archivalSpecs)){
-                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                             $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                             $now = Get-date
                             #Wait-Debugger
                             $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
@@ -780,9 +780,9 @@ if($SingleObject){
             }
 
             #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -894,9 +894,9 @@ if($SingleObject){
             }
             #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
            # if(-not [string]::IsNullOrEmpty($SLA.archivalSpecs)){
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 #Wait-Debugger
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
@@ -1106,9 +1106,9 @@ for($i = 0;$i -le $threadCount;$i++) {
                 }
             }
 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 #Wait-Debugger
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
@@ -1336,9 +1336,9 @@ $db_snap_info = $db_info.data
                 }
             }
             #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -1586,9 +1586,9 @@ for($i = 0;$i -le $threadCount;$i++) {
             }
             #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
            # if(-not [string]::IsNullOrEmpty($SLA.archivalSpecs)){
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -1810,9 +1810,9 @@ for($i = 0;$i -le $threadCount;$i++) {
                 }
             }
             #Check to see if SLA is tied to an Archive location before adding in the archive fields. 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                 $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -2033,9 +2033,9 @@ if($EC2_Instance){
                         $snapshot_stats.Contributing_to_Replication_Lag = "TRUE"
                     }
                 }
-                    $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                    $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                     $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                    $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                    $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                     $now = Get-date
                     $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                     $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -2265,9 +2265,9 @@ if($VolumeGroup){
                             $snapshot_stats.Contributing_to_Replication_Lag = "TRUE"
                         }
                     }
-                        $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                        $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                         $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                        $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                        $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                         $now = Get-date
                         $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                         $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -2484,9 +2484,9 @@ if($ManagedVolume){
                                 $snapshot_stats.Contributing_to_Replication_Lag = "TRUE"
                             }
                         }
-                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                            $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                             $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                            $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                             $now = Get-date
                             $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                             $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -2712,9 +2712,9 @@ if($OracleDB){
                         $snapshot_stats.Contributing_to_Replication_Lag = "TRUE"
                     }
                 }
-                    $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                    $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                     $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                    $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                    $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                     $now = Get-date
                     $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
                     $archive_lag = $now -gt ($snapshot_stats.Snapshot_Date).AddSeconds($archival_threshold) 
@@ -2956,9 +2956,9 @@ for($i = 0;$i -le $threadCount;$i++) {
                 }
             }
 
-                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId
+                $snapshot_stats.Archive_Location_ID_Based_On_SLA_assignment = ($SLA.archivalSpecs).locationId -join ","
                 $snapshot_stats.Archive_Threshold_in_seconds = ($SLA.archivalSpecs).archivalThreshold
-                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds)[0]
+                $snapshot_stats.Archive_Location_ID_of_individual_snapshot = ($snapshot.archivalLocationIds) -join ","[0]
                 $now = Get-date
                 #Wait-Debugger
                 $archival_threshold = ($SLA.archivalSpecs).archivalThreshold
