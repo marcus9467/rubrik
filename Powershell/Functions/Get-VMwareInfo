@@ -1,0 +1,324 @@
+
+function Get-VMwareInfo{
+    <#
+    .SYNOPSIS
+    Pull the snappable information for either all VMs on a given cluster, or search for VMs based on a name within a given cluster. Expected to be read into a variable for further filtering and manipulation. 
+
+    .EXAMPLE
+    Get-VMwareInfo -clusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa"
+    This will generate a list of VMs that reside on the cluster with ID 3bc43be7-00ca-4ed8-ba13-cef249d337fa.
+
+    .EXAMPLE
+    Get-VMwareInfo -clusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa" -VMname "acme"
+    This will generate a list of VMs that reside on the cluster with ID 3bc43be7-00ca-4ed8-ba13-cef249d337fa that have acme in the name of the VM. 
+
+    .NOTES
+    Author  : Marcus Henderson <marcus.henderson@rubrik.com>
+    Created : May 2, 2023
+    Company : Rubrik Inc
+    
+    #>
+  [CmdletBinding()]
+  param (
+      [parameter(Mandatory=$true)]
+      [string]$clusterId,
+      [parameter(Mandatory=$false)]
+      [string]$VMname
+  )
+  try{
+    $query = "query VSphereVMsListQuery(`$first: Int!, `$after: String, `$filter: [Filter!]!, `$isMultitenancyEnabled: Boolean = false, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isDuplicatedVmsIncluded: Boolean = true) {
+      vSphereVmNewConnection(filter: `$filter, first: `$first, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
+        edges {
+          cursor
+          node {
+            id
+            ...VSphereNameColumnFragment
+            ...CdmClusterColumnFragment
+            ...EffectiveSlaColumnFragment
+            ...VSphereSlaAssignmentColumnFragment
+            ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
+            isRelic
+            authorizedOperations
+            primaryClusterLocation {
+              id
+              name
+            }
+            logicalPath {
+              fid
+              name
+              objectType
+            }
+            slaPauseStatus
+            snapshotDistribution {
+              id
+              onDemandCount
+              retrievedCount
+              scheduledCount
+              totalCount
+            }
+            reportWorkload {
+              id
+              archiveStorage
+              physicalBytes
+            }
+            vmwareToolsInstalled
+            agentStatus {
+              agentStatus
+            }
+            duplicatedVms @include(if: `$isDuplicatedVmsIncluded) {
+              fid
+              cluster {
+                id
+                name
+                version
+                status
+              }
+              slaAssignment
+              effectiveSlaDomain {
+                ... on GlobalSlaReply {
+                  id
+                  name
+                  isRetentionLockedSla
+                  description
+                }
+                ... on ClusterSlaDomain {
+                  id
+                  fid
+                  name
+                  isRetentionLockedSla
+                  cluster {
+                    id
+                    name
+                  }
+                }
+              }
+              snapshotDistribution {
+                id
+                onDemandCount
+                retrievedCount
+                scheduledCount
+                totalCount
+              }
+              effectiveSlaSourceObject {
+                fid
+                objectType
+                name
+              }
+            }
+          }
+        }
+        pageInfo {
+          startCursor
+          endCursor
+          hasNextPage
+          hasPreviousPage
+        }
+      }
+    }
+    
+    fragment VSphereNameColumnFragment on HierarchyObject {
+      id
+      name
+      ...HierarchyObjectTypeFragment
+    }
+    
+    fragment HierarchyObjectTypeFragment on HierarchyObject {
+      objectType
+    }
+    
+    fragment EffectiveSlaColumnFragment on HierarchyObject {
+      id
+      effectiveSlaDomain {
+        ...EffectiveSlaDomainFragment
+        ... on GlobalSlaReply {
+          description
+        }
+      }
+      ... on CdmHierarchyObject {
+        pendingSla {
+          ...SLADomainFragment
+        }
+      }
+    }
+    
+    fragment EffectiveSlaDomainFragment on SlaDomain {
+      id
+      name
+      ... on GlobalSlaReply {
+        isRetentionLockedSla
+      }
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+        }
+        isRetentionLockedSla
+      }
+    }
+    
+    fragment SLADomainFragment on SlaDomain {
+      id
+      name
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+        }
+      }
+    }
+    
+    fragment CdmClusterColumnFragment on CdmHierarchyObject {
+      replicatedObjectCount
+      cluster {
+        id
+        name
+        version
+        status
+      }
+    }
+    
+    fragment VSphereSlaAssignmentColumnFragment on HierarchyObject {
+      effectiveSlaSourceObject {
+        fid
+        name
+        objectType
+      }
+      ...SlaAssignmentColumnFragment
+    }
+    
+    fragment SlaAssignmentColumnFragment on HierarchyObject {
+      slaAssignment
+    }
+    
+    fragment OrganizationsColumnFragment on HierarchyObject {
+      allOrgs {
+        name
+      }
+    }"
+
+    if(!($VMname)){
+        $VMName = ""
+        Write-Host ("Searching for all VMs on cluster " + $clusterId)
+    }
+
+    $variables = "{
+      `"isMultitenancyEnabled`": true,
+      `"isDuplicatedVmsIncluded`": false,
+      `"first`": 200,
+      `"filter`": [
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_REPLICATED`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_ACTIVE`",
+          `"texts`": [
+            `"true`"
+          ]
+        },
+        {
+            `"field`": `"NAME`",
+            `"texts`": [
+                `"$VMname`"
+            ]
+        },
+        {
+          `"field`": `"CLUSTER_ID`",
+          `"texts`": [
+            `"$clusterId`"
+          ]
+        },
+        {
+          `"field`": `"IS_ACTIVE_AMONG_DUPLICATED_OBJECTS`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ],
+      `"sortBy`": `"NAME`",
+      `"sortOrder`": `"ASC`"
+    }"
+    $JSON_BODY = @{
+      "variables" = $variables
+      "query" = $query
+  }
+  $snappableInfo = @()
+  $JSON_BODY = $JSON_BODY | ConvertTo-Json
+  $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+  $snappableInfo += (((($result.content | convertFrom-Json).data).vsphereVmNewConnection).edges).node
+
+  while ((((($result.content | convertFrom-Json).data).vsphereVmNewConnection).pageInfo).hasNextPage -eq $true){
+      $endCursor = (((($result.content | convertFrom-Json).data).vsphereVmNewConnection).pageInfo).endCursor
+      Write-Host ("Looking at End Cursor " + $endCursor)
+      $variables = "{
+        `"isMultitenancyEnabled`": true,
+        `"isDuplicatedVmsIncluded`": false,
+        `"first`": 200,
+        `"filter`": [
+          {
+            `"field`": `"IS_RELIC`",
+            `"texts`": [
+              `"false`"
+            ]
+          },
+          {
+            `"field`": `"IS_REPLICATED`",
+            `"texts`": [
+              `"false`"
+            ]
+          },
+          {
+            `"field`": `"IS_ACTIVE`",
+            `"texts`": [
+              `"true`"
+            ]
+          },
+          {
+            `"field`": `"NAME`",
+            `"texts`": [
+                `"$VMname`"
+            ]
+        },
+          {
+            `"field`": `"CLUSTER_ID`",
+            `"texts`": [
+              `"$clusterId`"
+            ]
+          },
+          {
+            `"field`": `"IS_ACTIVE_AMONG_DUPLICATED_OBJECTS`",
+            `"texts`": [
+              `"false`"
+            ]
+          }
+        ],
+        `"sortBy`": `"NAME`",
+        `"sortOrder`": `"ASC`",
+        `"after`": `"${endCursor}`"
+      }"
+      $JSON_BODY = @{
+          "variables" = $variables
+          "query" = $query
+      }
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
+  }
+  }
+  catch{
+    Write-Error("Error $($_)")
+  }
+  finally{
+    Write-Output $snappableInfo
+  }
+}

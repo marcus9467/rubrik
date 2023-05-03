@@ -1,0 +1,57 @@
+function Set-SLADomains{
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$SlaId,
+        [parameter(Mandatory=$true)]
+        [string]$ObjectIds
+    )
+    try{
+        $objectCount = ($objectIds.split(",") | measure-object).count
+        if($objectCount -gt 1){
+            $objectIds = $objectIds.split(",") | ConvertTo-Json
+            $variables = "{
+                `"userNote`": `"`",
+                `"globalExistingSnapshotRetention`": null,
+                `"globalSlaAssignType`": `"protectWithSlaId`",
+                `"globalSlaOptionalFid`": `"$SLAId`",
+                `"objectIds`": $ObjectIds,
+                `"shouldApplyToExistingSnapshots`": true,
+                `"shouldApplyToNonPolicySnapshots`": false
+            }"
+        }
+        if($objectCount -eq 1){
+            $variables = "{
+                `"userNote`": `"`",
+                `"globalExistingSnapshotRetention`": null,
+                `"globalSlaAssignType`": `"protectWithSlaId`",
+                `"globalSlaOptionalFid`": `"$SLAId`",
+                `"objectIds`": [
+                    $ObjectIds
+                ],
+                `"shouldApplyToExistingSnapshots`": true,
+                `"shouldApplyToNonPolicySnapshots`": false
+            }"
+        }
+        $query = "mutation AssignSlasForSnappableHierarchiesMutation(`$globalExistingSnapshotRetention: GlobalExistingSnapshotRetention, `$globalSlaOptionalFid: UUID, `$globalSlaAssignType: SlaAssignTypeEnum!, `$objectIds: [UUID!]!, `$applicableSnappableTypes: [WorkloadLevelHierarchy!], `$shouldApplyToExistingSnapshots: Boolean, `$shouldApplyToNonPolicySnapshots: Boolean, `$userNote: String) {
+            assignSlasForSnappableHierarchies(globalExistingSnapshotRetention: `$globalExistingSnapshotRetention, globalSlaOptionalFid: `$globalSlaOptionalFid, globalSlaAssignType: `$globalSlaAssignType, objectIds: `$objectIds, applicableSnappableTypes: `$applicableSnappableTypes, shouldApplyToExistingSnapshots: `$shouldApplyToExistingSnapshots, shouldApplyToNonPolicySnapshots: `$shouldApplyToNonPolicySnapshots, userNote: `$userNote) {
+              success
+              __typename
+            }
+          }"
+
+        $JSON_BODY = @{
+            "variables" = $variables
+            "query" = $query
+        }
+        $JSON_BODY = $JSON_BODY | ConvertTo-Json
+        $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $jobStatus = (($result.content | convertFrom-Json).data).assignSlasForSnappableHierarchies
+    }
+    catch{
+        Write-Error("Error $($_)")
+    }
+    finally{
+        Write-Output $jobStatus
+    }
+}

@@ -1,0 +1,66 @@
+function connect-polaris {
+
+    # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
+
+    [CmdletBinding()]
+
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$ServiceAccountJson
+        # Service account JSON file
+
+    )
+
+   
+
+    begin {
+
+        # Parse the JSON and build the connection string
+        $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
+        $connectionData = [ordered]@{
+
+            'client_id' = $serviceAccountObj.client_id
+
+            'client_secret' = $serviceAccountObj.client_secret
+
+        } | ConvertTo-Json
+
+    }
+
+   
+
+    process {
+
+        try{
+
+            $polaris = Invoke-RestMethod -Method Post -uri $serviceAccountObj.access_token_uri -ContentType application/json -body $connectionData
+
+        }
+
+        catch [System.Management.Automation.ParameterBindingException]{
+
+            Write-Error("The provided JSON has null or empty fields, try the command again with the correct file or redownload the service account JSON from Polaris")
+
+        }
+
+    }
+
+   
+
+    end {
+
+            if($polaris.access_token){
+
+                Write-Output $polaris
+
+            } else {
+
+                Write-Error("Unable to connect")
+
+            }
+
+           
+
+        }
+
+}

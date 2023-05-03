@@ -1,0 +1,52 @@
+function disconnect-polaris {
+
+    # Closes the session with the session token passed here
+
+    [CmdletBinding()]
+
+    param (
+    )
+
+   
+
+    begin {
+
+ 
+
+    }
+
+   
+
+    process {
+
+        try{
+
+            $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
+
+        }
+
+        catch [System.Management.Automation.ParameterBindingException]{
+
+            Write-Error("Failed to logout. Error $($_)")
+
+        }
+
+    }
+
+   
+
+    end {
+
+            if({$closeStatus -eq 204}){
+
+                Write-Output("Successfully logged out")
+
+            } else {
+
+                Write-Error("Error $($_)")
+
+            }
+
+        }
+
+}
