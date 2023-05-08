@@ -1,10 +1,26 @@
 function connect-polaris {
     <#
+    .SYNOPSIS
+    Function to provide the initial authorization to Rubrik Security Cloud using a service account JSON file. 
+    
     CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+    .EXAMPLE
+    $polSession = connect-polaris -ServiceAccountJson "ServiceAccount.json"
+    $rubtok = $polSession.access_token
+    $headers = @{
+        'Content-Type'  = 'application/json';
+        'Accept'        = 'application/json';
+        'Authorization' = $('Bearer ' + $rubtok);
+    }
+    
+    Establishes a session with RSC and creates the initial header information for later Invoke-WebRequest calls. 
+    
+    .NOTES
+    Author  : Marcus Henderson <marcus.henderson@rubrik.com>
+    Created : May 08, 2023
+    Company : Rubrik Inc
     #>
-
-    # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
 
     [CmdletBinding()]
 
