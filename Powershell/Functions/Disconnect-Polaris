@@ -10,6 +10,8 @@ function disconnect-polaris {
     [CmdletBinding()]
 
     param (
+        [parameter(Mandatory=$true)]
+        [string]$logoutUrl
     )
 
    
