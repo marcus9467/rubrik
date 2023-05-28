@@ -25,6 +25,7 @@ function Set-SLADomains{
             }"
         }
         if($objectCount -eq 1){
+            $ObjectIds = $ObjectIDs | ConvertTo-Json
             $variables = "{
                 `"userNote`": `"`",
                 `"globalExistingSnapshotRetention`": null,
