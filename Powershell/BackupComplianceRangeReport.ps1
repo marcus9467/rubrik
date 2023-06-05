@@ -42,35 +42,6 @@ param (
     [string]$SlaIds
 )
 
-
-<#
-TO DO
-
-Add in SLA filtering Functions
-Example Filter:
-{
-  "first": 50,
-  "filter": {
-    "complianceStatus": [
-      "IN_COMPLIANCE",
-      "OUT_OF_COMPLIANCE",
-      "NOT_AVAILABLE"
-    ],
-    "protectionStatus": [],
-    "slaDomain": {
-      "id": [
-        "09425d87-40fa-4903-8a4a-3fc9677e044f"
-      ]
-    },
-    "slaTimeRange": "SINCE_PROTECTION",
-    "orgId": []
-  },
-  "sortBy": "Name",
-  "sortOrder": "ASC"
-}
-#>
-
-
 ##################################
 
 # Adding certificate exception to prevent API errors
