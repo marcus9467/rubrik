@@ -541,29 +541,6 @@ function get-info{
               `"sortOrder`": `"ASC`"
             }"
           }
-            <#
-              $variables = "{
-              `"first`": 200,
-              `"filter`": {
-                `"cluster`": {
-                  `"id`": $clusterId
-                },
-                `"complianceStatus`": [
-                  `"IN_COMPLIANCE`",
-                  `"OUT_OF_COMPLIANCE`",
-                  `"NOT_AVAILABLE`"
-                ],
-                `"protectionStatus`": [],
-                `"slaDomain`": {
-                  `"id`": $SlaIDs
-                  }     
-                `"slaTimeRange`": `"PAST_7_DAYS`",
-                `"orgId`": []
-              },
-              `"sortBy`": `"Name`",
-              `"sortOrder`": `"ASC`"
-            }"
-            #>
             if($ClusterId -ne "[]") {
               Write-Host ("Gathering Compliance Info for clusters " + $clusterId)
             }
@@ -1045,6 +1022,7 @@ ForEach($object in $R2){
     else{
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
+        $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
         foreach($date in $dateReportTemplate){
             $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
         }
