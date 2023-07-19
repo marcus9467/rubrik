@@ -24,7 +24,7 @@ This will generate a list of objects and their compliance status over the last 7
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
-    Last Edit: April 11, 2023
+    Last Edit: July 19, 2023
     Company : Rubrik Inc
 
 #>
@@ -43,6 +43,10 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$CSV
 )
+
+#Add ClusterId field for end report for filter/sorting options
+#Look at cluster count calculation 
+
 
 ##################################
 
@@ -491,14 +495,6 @@ function get-info{
     process {
 
         try {
-
-          #if(!($ClusterId)) {
-          #  $ClusterId = $ClusterId.Split(",")
-          #  $ClusterId = $ClusterId | ConvertTo-Json
-          #}
-
-
-
           if(!($SlaIDs)){
             #Blank SLAs filter results in NO RESULTS
             $variables = "{
@@ -986,6 +982,7 @@ $SummaryInfo | Add-Member -NotePropertyName "InComplianceObjects" -NotePropertyV
 
 #Map the Missed Backups to the dateRangeTemplate
 $ObjectStrikeSnapInfo = @()
+$threeStrikeOffender = @()
 ForEach($object in $R2){
     if($object.missedSnapshots -gt 0){
         Write-Host ($object.name + " is out of compliance. Gathering Snapshot Information.")
@@ -999,24 +996,36 @@ ForEach($object in $R2){
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
-        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
+        #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
+        $MissedBackupIndex = 0
         foreach($date in $dateReportTemplate){
             if($MissedBackups -contains $date){
                 $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 0
+                $MissedBackupIndex++
             }
             else{
                 $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
+                $MissedBackupIndex = 0
+            }
+            if($MissedBackupIndex -gt 2){
+              $threeStrikeOffender += $BackupList
             }
         }
+        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
+        $BackupList | Add-Member -NotePropertyName "clusterName"  -NotePropertyValue ($object.cluster).name
+        $BackupList | Add-Member -NotePropertyName "clusterId"  -NotePropertyValue ($object.cluster).id
     }
     else{
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
-        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
+        #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         foreach($date in $dateReportTemplate){
             $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
         }
+        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
+        $BackupList | Add-Member -NotePropertyName "clusterName"  -NotePropertyValue ($object.cluster).name
+        $BackupList | Add-Member -NotePropertyName "clusterId"  -NotePropertyValue ($object.cluster).id
     }
     $object.AvailableBackupRange = $BackupList
     $ObjectStrikeSnapInfo += $object
@@ -1078,16 +1087,32 @@ $HtmlHead = '<style>
 $HTMLData = $SortedBackupRangeData |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
   $PSItem -replace "<td>0</td>", "<td style='background-color:#FF8080'>No Backup</td>"
 }
+#$FinishedData = $HTMLData
 $FinishedData = $HTMLData | ForEach-Object{
   $PSItem -replace "<td>1</td>", "<td style='background-color:#008000'>Backup Available</td>"
 }
 $HTMLSummary = $SummaryInfo |ConvertTo-Html -Head $HtmlHead
 $completedReport = $HTMLSummary + $FinishedData
-#Wait-Debugger
+
+#Get Color coordination for backup report
+$threeStrikeHTMLData = $threeStrikeOffender |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
+  $PSItem -replace "<td>0</td>", "<td style='background-color:#FF8080'>No Backup</td>"
+}
+#$FinishedData = $HTMLData
+$threeStrikeFinishedData = $threeStrikeHTMLData | ForEach-Object{
+  $PSItem -replace "<td>1</td>", "<td style='background-color:#008000'>Backup Available</td>"
+}
+
+$threeStrikeHTML = $HTMLSummary + $threeStrikeFinishedData
 Write-Host ("Writing report file to "  + $Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
 $completedReport | Out-File ($Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
+Write-Host ("Writing report file to "  + $Output_directory + "/threeStrikeReport" +$mdate + ".html")
+$threeStrikeHTML | Out-File ($Output_directory + "/threeStrikeReport" +$mdate + ".html")
+
 if($CSV){
   Write-Host ("Writing report file to "  + $Output_directory + "/ComplianceRangeReport" +$mdate + ".csv")
   $SortedBackupRangeData | Export-Csv -NoTypeInformation ($Output_directory + "/ComplianceRangeReport" +$mdate + ".csv")
+  Write-Host ("Writing 3 Strike Report file to "  + $Output_directory + "/threeStrikeReport" +$mdate + ".csv")
+  $threeStrikeOffender | Export-Csv -NoTypeInformation ($Output_directory + "/threeStrikeReport" +$mdate + ".csv")
 }
 disconnect-polaris
