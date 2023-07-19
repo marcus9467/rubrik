@@ -1031,7 +1031,7 @@ ForEach($Snappable in $BackupRangeData){
     $sortedData = $Snappable.Group | Sort-Object -Property "Location"
   }
   else{
-    $sortedData = $Snappable.Group
+    $sortedData = $Snappable.Group | Sort-Object -Property "Name"
   }
   $SortedBackupRangeData += $sortedData
 }
