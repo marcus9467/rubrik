@@ -943,7 +943,8 @@ $R2 = get-info
 
 $R2Count = $R2 | Measure-Object | Select-Object -ExpandProperty Count
 $ClusterInfo = Get-ClusterInfo
-$R2ClusterCount = ($ClusterInfo.id |Measure-Object).count
+$TotalRSClusterCount = ($ClusterInfo.id |Measure-Object).count
+$R2ClusterCount = ($R2.cluster | select-object id -unique | measure-object).count
 $R2SLACount = ($R2.slaDomain) | select-object ID -Unique | Measure-Object | Select-Object -ExpandProperty Count
 
 # Totals
@@ -997,6 +998,7 @@ ForEach($object in $R2){
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
         #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         $MissedBackupIndex = 0
+        $threestrikeHit = 0
         foreach($date in $dateReportTemplate){
             if($MissedBackups -contains $date){
                 $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "No Backup"
@@ -1006,7 +1008,8 @@ ForEach($object in $R2){
                 $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "Backup Available"
                 $MissedBackupIndex = 0
             }
-            if($MissedBackupIndex -gt 2){
+            if($MissedBackupIndex -gt 2 -and $threestrikeHit -ne 1){
+              $threestrikeHit = 1 
               $threeStrikeOffender += $BackupList
             }
         }
@@ -1081,7 +1084,8 @@ $HtmlHead = '<style>
     }
 </style>'
 
-
+$threeStrikeOffenderCount = ($threeStrikeOffender | measure-object).count
+$SummaryInfo | Add-Member -NotePropertyName "TotalThreeStrikes" -NotePropertyValue $threeStrikeOffenderCount
 #Get Color coordination for backup report
 $HTMLData = $SortedBackupRangeData |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
   $PSItem -replace "<td>No Backup</td>", "<td style='background-color:#FF8080'>No Backup</td>"
