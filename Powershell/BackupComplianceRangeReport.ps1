@@ -357,14 +357,12 @@ function Get-ClusterInfo{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $clusterInfo = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $clusterInfo = (((($clusterInfo.content | ConvertFrom-Json).data).clusterConnection).edges).node | where-object{$_.productType -ne "DATOS"}
-        $clusterList = $clusterInfo.id | ConvertTo-Json
+        #$clusterList = $clusterInfo.id | ConvertTo-Json
     }
     catch{
         Write-Error("Error $($_)")
     }
-    End{
-        Write-Output $clusterList
-    }
+        Write-Output $clusterInfo
 }
 function Get-ProtectionTaskDetails{
     
@@ -944,8 +942,9 @@ $logoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "sess
 $R2 = get-info
 
 $R2Count = $R2 | Measure-Object | Select-Object -ExpandProperty Count
-$R2ClusterCount = ($R2.cluster).id | Sort-Object -Unique |Measure-Object | Select-Object -ExpandProperty Count
-$R2SLACount = $R2 | Select-Object SLAID -Unique | Measure-Object | Select-Object -ExpandProperty Count
+$ClusterInfo = Get-ClusterInfo
+$R2ClusterCount = ($ClusterInfo.id |Measure-Object).count
+$R2SLACount = ($R2.slaDomain) | select-object ID -Unique | Measure-Object | Select-Object -ExpandProperty Count
 
 # Totals
 $TotalBackups = $R2 | Select-Object -ExpandProperty totalSnapshots | Measure-Object -Sum | Select-Object -ExpandProperty Sum
@@ -1000,11 +999,11 @@ ForEach($object in $R2){
         $MissedBackupIndex = 0
         foreach($date in $dateReportTemplate){
             if($MissedBackups -contains $date){
-                $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 0
+                $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "No Backup"
                 $MissedBackupIndex++
             }
             else{
-                $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
+                $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "Backup Available"
                 $MissedBackupIndex = 0
             }
             if($MissedBackupIndex -gt 2){
@@ -1021,7 +1020,7 @@ ForEach($object in $R2){
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
         #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         foreach($date in $dateReportTemplate){
-            $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
+            $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "Backup Available"
         }
         $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         $BackupList | Add-Member -NotePropertyName "clusterName"  -NotePropertyValue ($object.cluster).name
@@ -1085,22 +1084,22 @@ $HtmlHead = '<style>
 
 #Get Color coordination for backup report
 $HTMLData = $SortedBackupRangeData |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
-  $PSItem -replace "<td>0</td>", "<td style='background-color:#FF8080'>No Backup</td>"
+  $PSItem -replace "<td>No Backup</td>", "<td style='background-color:#FF8080'>No Backup</td>"
 }
 #$FinishedData = $HTMLData
 $FinishedData = $HTMLData | ForEach-Object{
-  $PSItem -replace "<td>1</td>", "<td style='background-color:#008000'>Backup Available</td>"
+  $PSItem -replace "<td>Backup Available</td>", "<td style='background-color:#008000'>Backup Available</td>"
 }
 $HTMLSummary = $SummaryInfo |ConvertTo-Html -Head $HtmlHead
 $completedReport = $HTMLSummary + $FinishedData
 
 #Get Color coordination for backup report
 $threeStrikeHTMLData = $threeStrikeOffender |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
-  $PSItem -replace "<td>0</td>", "<td style='background-color:#FF8080'>No Backup</td>"
+  $PSItem -replace "<td>No Backup</td>", "<td style='background-color:#FF8080'>No Backup</td>"
 }
 #$FinishedData = $HTMLData
 $threeStrikeFinishedData = $threeStrikeHTMLData | ForEach-Object{
-  $PSItem -replace "<td>1</td>", "<td style='background-color:#008000'>Backup Available</td>"
+  $PSItem -replace "<td>Backup Available</td>", "<td style='background-color:#008000'>Backup Available</td>"
 }
 
 $threeStrikeHTML = $HTMLSummary + $threeStrikeFinishedData
