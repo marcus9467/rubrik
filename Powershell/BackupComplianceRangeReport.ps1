@@ -24,7 +24,7 @@ This will generate a list of objects and their compliance status over the last 7
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
-    Last Edit: June 19, 2023
+    Last Edit: April 11, 2023
     Company : Rubrik Inc
 
 #>
@@ -39,7 +39,9 @@ param (
     [parameter(Mandatory=$false)]
     [string]$ClusterId = "[]",
     [parameter(Mandatory=$false)]
-    [string]$SlaIds
+    [string]$SlaIds,
+    [parameter(Mandatory=$false)]
+    [switch]$CSV
 )
 
 ##################################
@@ -48,6 +50,8 @@ param (
 
 ##################################
 if ($IsWindows -eq $true){
+
+<#
   add-type @"
 
     using System.Net;
@@ -72,6 +76,8 @@ if ($IsWindows -eq $true){
 
   [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+#>
+
 
 }
 
@@ -852,24 +858,6 @@ function get-SnapshotInfo{
                 $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
                 Write-Host ("Looking at End Cursor " + $endCursor)
                 $variables = "{
-                    `"first`": 50,
-                    `"filter`": {
-                        `"time_gt`": `"${startDate}`",
-                        `"time_lt`": `"${currentDate}`",
-                        `"clusterUuid`": ${clusterList},
-                      `"taskCategory`": [
-                        `"Protection`"
-                      ],
-                      `"taskType`": [
-                        `"Backup`"
-                      ],
-                      `"orgId`": []
-                    },
-                    `"sortBy`": `"EndTime`",
-                    `"sortOrder`": `"DESC`",
-                    `"after`": `"${endCursor}`"
-                  }"
-                  "{
                     `"snappableId`": `"${snappableId}`",
                     `"first`": 50,
                     `"sortBy`": `"CREATION_TIME`",
@@ -990,7 +978,7 @@ ForEach($object in $R2){
     $object | Add-Member -NotePropertyName "AvailableBackupRange" -NotePropertyValue $dateFormattedReportTemplate
 }
 
-$ObjectsWithStrikes = $R2 | Where-Object {$_.missedSnapshots -gt 0} | Measure-Object | Select-Object -ExpandProperty Count
+$ObjectsWithStrikes = $R2 | Where-Object {$_.missedSnapshots -gt 0} | Measure-Object |Select-Object -ExpandProperty Count
 $ObjectsWithoutStrikes = $R2 | Where-Object {$_.missedSnapshots -eq 0} | Measure-Object | Select-Object -ExpandProperty Count
 
 $SummaryInfo | Add-Member -NotePropertyName "OutOfComplianceObjects" -NotePropertyValue $ObjectsWithStrikes
@@ -1010,6 +998,8 @@ ForEach($object in $R2){
         $MissedBackups = (Compare-Object -ReferenceObject $dateReportTemplate -DifferenceObject $snapshotList).inputObject
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
+        $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
+        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         foreach($date in $dateReportTemplate){
             if($MissedBackups -contains $date){
                 $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 0
@@ -1023,6 +1013,7 @@ ForEach($object in $R2){
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
+        $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         foreach($date in $dateReportTemplate){
             $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue 1
         }
@@ -1031,7 +1022,19 @@ ForEach($object in $R2){
     $ObjectStrikeSnapInfo += $object
 
 }
-#Swap over from $R2 to $ObjectStrikeSnapInfo
+#Sort Based on Location
+$BackupRangeData = $ObjectStrikeSnapInfo.AvailableBackupRange | Group-Object objectType
+$SortedBackupRangeData = @()
+
+ForEach($Snappable in $BackupRangeData){
+  if($Snappable.Name -ne "VmwareVirtualMachine"){
+    $sortedData = $Snappable.Group | Sort-Object -Property "Location"
+  }
+  else{
+    $sortedData = $Snappable.Group
+  }
+  $SortedBackupRangeData += $sortedData
+}
 
 #Establish HTML Header information
 $HtmlHead = '<style>
@@ -1070,8 +1073,9 @@ $HtmlHead = '<style>
     }
 </style>'
 
+
 #Get Color coordination for backup report
-$HTMLData = ($ObjectStrikeSnapInfo).AvailableBackupRange |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
+$HTMLData = $SortedBackupRangeData |ConvertTo-Html -Head $HtmlHead | ForEach-Object {
   $PSItem -replace "<td>0</td>", "<td style='background-color:#FF8080'>No Backup</td>"
 }
 $FinishedData = $HTMLData | ForEach-Object{
@@ -1082,4 +1086,8 @@ $completedReport = $HTMLSummary + $FinishedData
 #Wait-Debugger
 Write-Host ("Writing report file to "  + $Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
 $completedReport | Out-File ($Output_directory + "/ComplianceRangeReport" +$mdate + ".html")
+if($CSV){
+  Write-Host ("Writing report file to "  + $Output_directory + "/ComplianceRangeReport" +$mdate + ".csv")
+  $SortedBackupRangeData | Export-Csv -NoTypeInformation ($Output_directory + "/ComplianceRangeReport" +$mdate + ".csv")
+}
 disconnect-polaris
