@@ -609,7 +609,7 @@ function get-info{
             
             while ((((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).hasNextPage -eq $true){
                 $endCursor = (((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).endCursor
-                Write-Host ("Looking at End Cursor " + $endCursor)
+                Write-Host ("Paging through another 200 Objects. Looking at End Cursor " + $endCursor)
                 if(!($SlaIDs)){
                   $variables = "{
                     `"first`": 200,
@@ -850,7 +850,7 @@ function get-SnapshotInfo{
 
             while ((((($result.content | ConvertFrom-Json).data).snapshotsListConnection).pageInfo).hasNextPage -eq $true){
                 $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
-                Write-Host ("Looking at End Cursor " + $endCursor)
+                Write-Host ("Paging through another 50 snapshots. Looking at End Cursor " + $endCursor)
                 $variables = "{
                     `"snappableId`": `"${snappableId}`",
                     `"first`": 50,
