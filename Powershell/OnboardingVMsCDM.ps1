@@ -33,17 +33,31 @@ param(
 
 #Note, we'll likely need to modify this a bit from the straight import to allow for custom headers. This script needs a list of names, so we'll want to filter for that column. 
 $VMList = Import-Csv $CSV
-
 $VMCount = ($VMList | Measure-Object).Count
+$Output_directory = (Get-Location).path
+$mdate = (Get-Date).tostring("yyyyMMddHHmm")
 
 Connect-Rubrik -Server $rubrikAddress -Id $serviceAccountId -Secret $serviceAccountSecret
 $IndexCount = 1
+$MissingVMList = @()
 ForEach($VM in $VMList){
     Write-Host ("Gathering information on VM " + $VM)
-    $VmInfo = Get-RubrikVM -Name $VM
-    Write-Host ("Registering and Assigning Protection to VM " + $VM)
-    Register-RubrikBackupService -id $VmInfo.id
-    Protect-RubrikVM -id $VmInfo.id -SLA $slaName -Confirm:$false
-    $IndexCount++
-    Write-Host "Finished Processing " + $IndexCount + "of " + $VMCount + " VMs"
+   # $VmInfo = Get-RubrikVM -Name $VM
+    try{
+        $VmInfo = Get-RubrikVM -Name $VM
+        Write-Host ("Registering and Assigning Protection to VM " + $VM)
+        Register-RubrikBackupService -id $VmInfo.id
+        Protect-RubrikVM -id $VmInfo.id -SLA $slaName -Confirm:$false
+        $IndexCount++
+        Write-Host "Finished Processing " + $IndexCount + "of " + $VMCount + " VMs"
+    }
+    catch{
+        Write-Host ("Unable to Find information on VM " + $VM)
+        Write-Host "Appending to a CSV for later review"
+        $MissingVMList += $VM  
+        return
+    }
+
 }
+$MissingVMList| Export-Csv -NoTypeInformation ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport" +$mdate + ".csv")
+Disconnect-Rubrik
