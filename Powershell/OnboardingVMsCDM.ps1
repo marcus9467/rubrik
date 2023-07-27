@@ -33,6 +33,7 @@ param(
 
 #Note, we'll likely need to modify this a bit from the straight import to allow for custom headers. This script needs a list of names, so we'll want to filter for that column. 
 $VMList = Import-Csv $CSV
+$VMList = $VMList.Name
 $VMCount = ($VMList | Measure-Object).Count
 $Output_directory = (Get-Location).path
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
@@ -48,18 +49,24 @@ ForEach($VM in $VMList){
     try{
         $VmInfo = Get-RubrikVM -Name $VM
         Write-Host ("Registering and Assigning Protection to VM " + $VM)
-        Register-RubrikBackupService -id $VmInfo.id
+        Register-RubrikBackupService -id $VmInfo.id -ErrorVariable vmerror
         Protect-RubrikVM -id $VmInfo.id -SLA $slaName -Confirm:$false
-        Write-Host "Finished Processing " + $IndexCount + "of " + $VMCount + " VMs"
+        Write-Host ("Finished Processing " + $IndexCount + "of " + $VMCount + " VMs")
     }
     catch{
-        Write-Host ("Unable to Find information on VM " + $VM)
+        Write-Host ("Unable to Find information on VM " + $VMInfo)
         Write-Host "Appending to a CSV for later review"
-        $MissingVMList += $VM  
+        $errorMessage = ($vmerror.message | Select-Object -last 1)
+        $VMErrorInfo = New-Object psobject
+        $VMErrorInfo | Add-Member -NotePropertyName "Name" -NotePropertyValue $VM
+        $VMErrorInfo | Add-Member -NotePropertyName "Id" -NotePropertyValue $VmInfo.id
+        $VMErrorInfo | Add-Member -NotePropertyName "errorMessage" -NotePropertyValue $errorMessage
+
+        $MissingVMList += $VMErrorInfo  
     }
     $IndexCount++
 }
 Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
-$MissingVMList| Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
+$MissingVMList | Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
 Write-Host ("Disconnecting From Rubrik Cluster " + $clusterName)
 Disconnect-Rubrik
