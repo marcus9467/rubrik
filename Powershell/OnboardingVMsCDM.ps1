@@ -38,6 +38,9 @@ $Output_directory = (Get-Location).path
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
 
 Connect-Rubrik -Server $rubrikAddress -Id $serviceAccountId -Secret $serviceAccountSecret
+$clusterInfo = Get-RubrikClusterInfo
+$clusterName = $clusterinfo.Name
+
 $IndexCount = 1
 $MissingVMList = @()
 ForEach($VM in $VMList){
@@ -53,11 +56,9 @@ ForEach($VM in $VMList){
         Write-Host ("Unable to Find information on VM " + $VM)
         Write-Host "Appending to a CSV for later review"
         $MissingVMList += $VM  
-        return
     }
     $IndexCount++
 }
-Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport" +$mdate + ".csv")
-$MissingVMList| Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport" +$mdate + ".csv")
-Write-Host "Disconnecting Session to Rubrik Cluster"
+Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
+$MissingVMList| Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
 Disconnect-Rubrik
