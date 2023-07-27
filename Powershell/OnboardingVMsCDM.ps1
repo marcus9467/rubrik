@@ -58,5 +58,6 @@ ForEach($VM in $VMList){
     }
     $IndexCount++
 }
-$MissingVMList| Export-Csv -NoTypeInformation ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport" +$mdate + ".csv")
+Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport" +$mdate + ".csv")
+$MissingVMList| Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport" +$mdate + ".csv")
 Disconnect-Rubrik
