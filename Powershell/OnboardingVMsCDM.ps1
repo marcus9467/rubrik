@@ -42,7 +42,6 @@ $IndexCount = 1
 $MissingVMList = @()
 ForEach($VM in $VMList){
     Write-Host ("Gathering information on VM " + $VM)
-   # $VmInfo = Get-RubrikVM -Name $VM
     try{
         $VmInfo = Get-RubrikVM -Name $VM
         Write-Host ("Registering and Assigning Protection to VM " + $VM)
