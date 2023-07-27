@@ -61,4 +61,5 @@ ForEach($VM in $VMList){
 }
 Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
 $MissingVMList| Export-Csv -NoTypeInformation ($Output_directory + "/MissingVMsReport_" + $clusterName + "_" +$mdate + ".csv")
+Write-Host ("Disconnecting From Rubrik Cluster " + $clusterName)
 Disconnect-Rubrik
