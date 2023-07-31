@@ -34,8 +34,8 @@ param (
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
     [parameter(Mandatory=$true)]
-    [ValidateSet("PAST_365_DAYS","PAST_90_DAYS","PAST_30_DAYS","PAST_7_DAYS","LAST_24_HOURS")]
-    [string]$daysToReport,
+    [ValidateSet("PAST_365_DAYS","PAST_90_DAYS","PAST_30_DAYS","PAST_7_DAYS","PAST_3_DAYS","LAST_24_HOURS")]
+    [string]$ReportRange,
     [parameter(Mandatory=$false)]
     [string]$ClusterId = "[]",
     [parameter(Mandatory=$false)]
@@ -88,6 +88,15 @@ if ($IsWindows -eq $true){
 if($IsMacOS -eq $true){
   #Do Nothing for now
 }
+
+#inserting logic to filter the dates down to the last 3 days only.
+if($ReportRange -eq "PAST_3_DAYS"){
+  $daysToReport = "PAST_7_DAYS"
+}
+else{
+  $daysToReport = $ReportRange
+}
+
 
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $Output_directory = (Get-Location).path
@@ -960,6 +969,11 @@ $SummaryInfo | Add-Member -NotePropertyName "TotalMissedBackupCount" -NoteProper
 
 #Get Range of Dates Specified and setup table for html function later. 
 $dateArray = Get-DateRange $startDate $currentDate
+if($ReportRange -eq "PAST_3_DAYS"){
+  #Need to set the range to -2 as the report includes the current day as well as the prior amount specified here. 
+  $threeDaysAgo = (Get-Date $currentdate).addDays(-2)
+  $dateArray = Get-DateRange $threeDaysAgo $currentDate
+}
 $dateReportTemplate = @()
 ForEach($day in $dateArray){
     $formatedDate = $day.ToString("yyyy-MM-dd")
