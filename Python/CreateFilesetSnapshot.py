@@ -12,7 +12,6 @@ python3 CreateFilesetSnapshot.py --keyfile ServiceAccount.json --filesetId "ce61
 
 import argparse
 import json
-import pprint
 import requests
 
 requests.packages.urllib3.disable_warnings()
