@@ -238,7 +238,7 @@ $JSON_BODY = @{
 $JSON_BODY = $JSON_BODY | ConvertTo-Json
 $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
 $downloadURL = ((($info.content | convertFrom-Json).data).getDownloadURL).url
-
+$reportName = ($downloadURL.split("/")[4]).split("_")[0]
 #Download the file:
-Write-Host ("Downloading the requested report to " + $Output_directory + "/DownloadedReport-" + $mdate + ".csv")
+Write-Host ("Downloading the requested report to " + $Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
 Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/DownloadedReport-" + $mdate + ".csv" )
