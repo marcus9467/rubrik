@@ -24,10 +24,9 @@ param (
 #These must be input specific to your environment. 
 $ServiceAccountJson = "/Users/User/Documents/serviceAccountJson.json"
 $reportId = "18"
-
+$Output_directory = (Get-Location).path
 ################################################################################################################################################################################################
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
-$Output_directory = (Get-Location).path
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
 function connect-polaris {
 
