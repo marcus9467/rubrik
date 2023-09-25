@@ -239,5 +239,5 @@ $downloadURL = ((($info.content | convertFrom-Json).data).getDownloadURL).url
 $reportName = ($downloadURL.split("/")[4]).split("_")[0]
 #Download the file:
 Write-Host ("Downloading the requested report to " + $Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
-Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/DownloadedReport-" + $mdate + ".csv" )
+Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
 disconnect-polaris
