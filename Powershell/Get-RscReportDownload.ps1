@@ -193,7 +193,6 @@ $query = "query GetUserDownloadsQuery {
       identifier
       createTime
       completeTime
-      __typename
     }
   }"
 $variables = ""
@@ -204,13 +203,13 @@ $JSON_BODY = @{
 $JSON_BODY = $JSON_BODY | ConvertTo-Json
 
 $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-$filePrepStatus = ((($info.Content | convertFrom-Json).data).getUserDownloads).status[0]
+$filePrepStatus = (((($info.Content | convertFrom-Json).data).getUserDownloads)[0]).status
 while($filePrepStatus -ne "COMPLETED"){
     Write-Host "Awaiting file preperation process"
     (($info.Content | convertFrom-Json).data).getUserDownloads[0]
     sleep 10
     $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-    $filePrepStatus = ((($info.Content | convertFrom-Json).data).getUserDownloads).status[0]
+    $filePrepStatus = (((($info.Content | convertFrom-Json).data).getUserDownloads)[0]).status
 }
 $downloadId = ((($info.Content | convertFrom-Json).data).getUserDownloads)[0].id
 
@@ -240,4 +239,5 @@ $downloadURL = ((($info.content | convertFrom-Json).data).getDownloadURL).url
 $reportName = ($downloadURL.split("/")[4]).split("_")[0]
 #Download the file:
 Write-Host ("Downloading the requested report to " + $Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
-Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
+Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/DownloadedReport-" + $mdate + ".csv" )
+disconnect-polaris
