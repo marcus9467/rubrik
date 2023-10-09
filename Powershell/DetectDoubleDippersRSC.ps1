@@ -858,6 +858,227 @@ function Get-MSSQLDBs{
   }
   Write-Output $sqlDbInfo
 }
+function Get-MSSQLAGs{
+  try{
+    $query = "query MssqlAvailabilityGroupListQuery(`$first: Int!, `$after: String, `$filter: [Filter!], `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isMultitenancyEnabled: Boolean = false, `$databaseDescendantFilter: [Filter!]) {
+      mssqlTopLevelDescendants(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, typeFilter: [MssqlAvailabilityGroup]) {
+        edges {
+          cursor
+          node {
+            id
+            authorizedOperations
+            ...MssqlNameColumnFragment
+            ...AvailabilityGroupDatabaseCopyOnlyColumnFragment
+            ...AvailabilityGroupMssqlDatabaseCountColumnFragment
+            ...CdmClusterColumnFragment
+            ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
+            ...CdmClusterLabelFragment
+            ...EffectiveSlaColumnFragment
+            ...SlaAssignmentColumnFragment
+            ...AvailabilityGroupInstanceColumnFragment
+            __typename
+          }
+          __typename
+        }
+        pageInfo {
+          startCursor
+          endCursor
+          hasNextPage
+          hasPreviousPage
+          __typename
+        }
+        __typename
+      }
+    }
+    
+    fragment OrganizationsColumnFragment on HierarchyObject {
+      allOrgs {
+        name
+        __typename
+      }
+      __typename
+    }
+    
+    fragment MssqlNameColumnFragment on HierarchyObject {
+      id
+      name
+      objectType
+      __typename
+    }
+    
+    fragment AvailabilityGroupDatabaseCopyOnlyColumnFragment on MssqlAvailabilityGroup {
+      copyOnly
+      __typename
+    }
+    
+    fragment AvailabilityGroupMssqlDatabaseCountColumnFragment on MssqlAvailabilityGroup {
+      descendantConnection(filter: `$databaseDescendantFilter, typeFilter: [Mssql]) {
+        count
+        __typename
+      }
+      __typename
+    }
+    
+    fragment CdmClusterColumnFragment on CdmHierarchyObject {
+      replicatedObjectCount
+      cluster {
+        id
+        name
+        version
+        status
+        __typename
+      }
+      __typename
+    }
+    
+    fragment CdmClusterLabelFragment on CdmHierarchyObject {
+      cluster {
+        id
+        name
+        version
+        __typename
+      }
+      primaryClusterLocation {
+        id
+        __typename
+      }
+      __typename
+    }
+    
+    fragment EffectiveSlaColumnFragment on HierarchyObject {
+      id
+      effectiveSlaDomain {
+        ...EffectiveSlaDomainFragment
+        ... on GlobalSlaReply {
+          description
+          __typename
+        }
+        __typename
+      }
+      ... on CdmHierarchyObject {
+        pendingSla {
+          ...SLADomainFragment
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    
+    fragment EffectiveSlaDomainFragment on SlaDomain {
+      id
+      name
+      ... on GlobalSlaReply {
+        isRetentionLockedSla
+        retentionLockMode
+        __typename
+      }
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+          __typename
+        }
+        isRetentionLockedSla
+        retentionLockMode
+        __typename
+      }
+      __typename
+    }
+    
+    fragment SLADomainFragment on SlaDomain {
+      id
+      name
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    
+    fragment SlaAssignmentColumnFragment on HierarchyObject {
+      slaAssignment
+      __typename
+    }
+    
+    fragment AvailabilityGroupInstanceColumnFragment on MssqlAvailabilityGroup {
+      instances {
+        logicalPath {
+          fid
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }"
+    $variables = "{
+      `"isMultitenancyEnabled`": true,
+      `"first`": 50,
+      `"filter`": [
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_REPLICATED`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_ARCHIVED`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ],
+      `"sortBy`": `"NAME`",
+      `"sortOrder`": `"ASC`",
+      `"databaseDescendantFilter`": [
+        {
+          `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_MOUNT`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_ARCHIVED`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ]
+    }"
+    $JSON_BODY = @{
+      "variables" = $variables
+      "query" = $query
+    }
+    $sqlAgInfo = @()
+    $JSON_BODY = $JSON_BODY | ConvertTo-Json
+    $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+    $sqlAgInfo += (((($result.Content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
+
+  }
+  catch{
+    Write-Error("Error $($_)")
+  }
+  Write-Output $sqlAgInfo
+}
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
 $polSession = connect-polaris
