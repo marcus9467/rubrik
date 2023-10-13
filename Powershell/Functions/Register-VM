@@ -21,6 +21,7 @@ function Register-VM{
         }
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $result = ($results.Content | ConvertFrom-Json).data
     }
     catch{
         Write-Error("Error $($_)")
