@@ -831,7 +831,7 @@ if($SingleObject){
         $dumpedToCsv = $false
         $retryCount = 0
 
-                $Good_Snaps_list| Export-Csv -Append -NoTypeInformation ($Output_directory + "/listof_SQL_snaps-" + $startTime + ".csv")
+                $Good_Snaps_list| Export-Csv -Append -NoTypeInformation ($Output_directory + "/listof_SQL_snaps-" + $mdate + ".csv")
                 $dumpedToCsv = $true  
 
 
@@ -944,9 +944,9 @@ if($SingleObject){
 
 
 
-                $fileTestPath = $Output_directory + "/listof_Fileset_snaps-" + $startTime + ".csv"
+                $fileTestPath = $Output_directory + "/listof_Fileset_snaps-" + $mdate + ".csv"
 
-                $Good_Snaps_list| Export-Csv -Append -NoTypeInformation ($Output_directory + "/listof_Fileset_snaps-" + $startTime + ".csv")
+                $Good_Snaps_list| Export-Csv -Append -NoTypeInformation ($Output_directory + "/listof_Fileset_snaps-" + $mdate + ".csv")
                 $dumpedToCsv = $true
 
     }
