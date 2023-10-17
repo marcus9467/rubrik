@@ -243,16 +243,23 @@ Invoke-WebRequest -Uri "$downloadURL" -OutFile ($Output_directory + "/" + $repor
 disconnect-polaris
 
 
-$reportData = Import-CSV ($Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
+$reportData = ($Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
+
+$CustomReport = [System.Collections.ArrayList]::new()
+Import-Csv -Path $reportData | ForEach-Object {
+    $server = [PSCustomObject]@{
+        "Object Name"          = if ($_."Object Type" -match "VM") { $_."Object Name" }
+                                 elseif ($_."Object Type" -match "fileset") { $_."Location" }
+                                 else { $null }
+        "Object Type"          = $_."Object Type"
+        "Location"             = $_."Location"
+        "SLA Domain"           = $_."SLA Domain"
+        "Latest local snapshot"= $_."Last Local Snapshot"
+        "ObjectNameOriginal"    = $_."Object Name"
+    }
+    [void]$CustomReport.Add($server)
+}
 Write-Host ("Cleaning up original report " + $Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
 Remove-Item ($Output_directory + "/" + $reportName + "-" + $mdate + ".csv")
-$formattedReport = @()
-forEach($object in $reportData){
-    $object | Add-Member -NotePropertyName "ObjectNameOriginal" -NotePropertyValue $object."Object Name"
-    if($object."Object Type" -match "fileset"){
-        $object."Object Name" = $object."location"
-    }
-    $formattedReport += $object
-}
 Write-Host ("Writing new report to " + $Output_directory + "/FilteredReport-" + $mdate + ".csv")
-$formattedReport | Select-Object "Object Name", "Object Type", "Location", "SLA Domain", "Last Local Snapshot", "ObjectNameOriginal" | Export-Csv ($Output_directory + "/FilteredReport-" + $mdate + ".csv")
+$CustomReport | Export-Csv -NoTypeInformation ($Output_directory + "/FilteredReport-" + $mdate + ".csv")
