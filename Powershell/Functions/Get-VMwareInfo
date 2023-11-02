@@ -41,6 +41,7 @@ function Get-VMwareInfo{
             ...VSphereSlaAssignmentColumnFragment
             ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
             isRelic
+            guestOsType
             authorizedOperations
             primaryClusterLocation {
               id
