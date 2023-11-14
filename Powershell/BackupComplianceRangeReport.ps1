@@ -4,19 +4,19 @@
 This script will extract compliance and snapshot information for all CDM clusters in a given RSC environment. Filters are available for both clusters and slas. 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report.
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the clusterUUIDs specified 
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the SLAIDs specified. The SLAIDs can either be the local CDM IDs, or the global RSC FIDs
 
@@ -24,9 +24,8 @@ This will generate a list of objects and their compliance status over the last 7
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
-    Last Edit: July 31, 2023
+    Last Edit : November 14, 2023
     Company : Rubrik Inc
-
 #>
 
 [cmdletbinding()]
@@ -378,7 +377,7 @@ function Get-ProtectionTaskDetails{
     Try{
         #Set Timeframe to scan based on $DaysToReport
         $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
-        $currentDate = Get-Date -Format $InFormat 
+        $currentDate = (Get-Date -Format $InFormat)
         $startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
         $protectionTaskDetailsData = @()
 
@@ -916,7 +915,9 @@ Function Get-DateRange{
 
 #Set Timeframe to scan based on $DaysToReport
 $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
-$currentDate = Get-Date -Format $InFormat 
+#Setting current date to n - 1 to account for backups that run in the evening, while the report runs earlier in the day. 
+$currentDate = (Get-Date -Format $InFormat).AddDays(-1)
+
 if($daysToReport){
   if($daysToReport -match "PAST_365_DAYS"){
     $actualDaysToReport = 365
@@ -937,7 +938,6 @@ if($daysToReport){
 }
 $startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
 
-#$daysToReport = 7
 $polSession = connect-polaris
 $rubtok = $polSession.access_token
 $headers = @{
