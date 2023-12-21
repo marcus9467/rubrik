@@ -916,7 +916,7 @@ Function Get-DateRange{
 #Set Timeframe to scan based on $DaysToReport
 $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
 #Setting current date to n - 1 to account for backups that run in the evening, while the report runs earlier in the day. 
-$currentDate = (Get-Date -Format $InFormat).AddDays(-1)
+$currentDate = ((Get-Date).AddDays(-1)).ToString($InFormat)
 
 if($daysToReport){
   if($daysToReport -match "PAST_365_DAYS"){
