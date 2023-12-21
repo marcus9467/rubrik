@@ -24,7 +24,7 @@ This will generate a list of objects and their compliance status over the last 7
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
-    Last Edit : November 14, 2023
+    Last Edit : December 21, 2023
     Company : Rubrik Inc
 #>
 
@@ -1030,18 +1030,23 @@ ForEach($object in $R2){
         $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         $BackupList | Add-Member -NotePropertyName "clusterName"  -NotePropertyValue ($object.cluster).name
         $BackupList | Add-Member -NotePropertyName "clusterId"  -NotePropertyValue ($object.cluster).id
+        $BackupList | Add-Member -NotePropertyName "lastSnapshot"  -NotePropertyValue $object.lastSnapshot
+        $BackupList | Add-Member -NotePropertyName "complianceStatus"  -NotePropertyValue $object.complianceStatus
+        $BackupList | Add-Member -NotePropertyName "missedSnapshots"  -NotePropertyValue $object.missedSnapshots
     }
     else{
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
-        #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         foreach($date in $dateReportTemplate){
             $BackupList | Add-Member -NotePropertyName $date -NotePropertyValue "Backup Available"
         }
         $BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         $BackupList | Add-Member -NotePropertyName "clusterName"  -NotePropertyValue ($object.cluster).name
         $BackupList | Add-Member -NotePropertyName "clusterId"  -NotePropertyValue ($object.cluster).id
+        $BackupList | Add-Member -NotePropertyName "lastSnapshot"  -NotePropertyValue $object.lastSnapshot
+        $BackupList | Add-Member -NotePropertyName "complianceStatus"  -NotePropertyValue $object.complianceStatus
+        $BackupList | Add-Member -NotePropertyName "missedSnapshots"  -NotePropertyValue $object.missedSnapshots
     }
     $object.AvailableBackupRange = $BackupList
     $ObjectStrikeSnapInfo += $object
