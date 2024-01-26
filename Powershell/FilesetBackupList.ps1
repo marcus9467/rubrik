@@ -507,7 +507,6 @@ function Get-FilePath{
         [string]$snapshotId,
         [parameter(Mandatory=$true)]
         [string]$browsePath
-        #[string]$after = $null  # Optional parameter for pagination
     )
     process {
         try{
@@ -573,7 +572,7 @@ function Get-FilePath{
                 # If the item is a directory, recurse into it
                 if ($type -eq 'DIRECTORY') {
                     Write-Host ("Processing directory " + $item.absolutePath)
-                    $subFiles = Browse-FilePath -snapshotId $snapshotId -browsePath $item.absolutePath
+                    $subFiles = Get-FilePath -snapshotId $snapshotId -browsePath $item.absolutePath
                     
                     # Add the results of the recursion to the list
                     foreach ($subFile in $subFiles) {
