@@ -8,9 +8,16 @@ This script will onboard new MSSQL hosts based on a provided CSV file and then l
 
 This will onboard new Windows hosts that were noted in the supplied CSV file to cluster f60da42b-f191-4ed4-8278-164f148b839c
 
+.EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -OnboardMSSQL
+
+This will onboard new MSSQL databases by applying protection at either the AG or Host level. Need to update the SLA logic based on tier. For the input CSV the expectation is to have the following headers:
+
+fqdn,u_tier_rating,ClusterName,RubrikLocation
+
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
-    Created : August 11, 2023
+    Created : March 04, 2024
     Company : Rubrik Inc
 
 #>
@@ -26,7 +33,9 @@ param (
     [parameter(Mandatory=$false)]
     [string]$clusterId,
     [parameter(Mandatory=$false)]
-    [switch]$OnboardHosts
+    [switch]$OnboardHosts,
+    [parameter(Mandatory=$false)]
+    [switch]$OnboardMSSQL
 )
 
 function connect-rsc {
@@ -148,16 +157,18 @@ function disconnect-rsc {
         }
 
 }
-function Get-MssqlDbs{
+function Get-MssqlHosts{
     [CmdletBinding()]
   
     param (
         [parameter(Mandatory=$true)]
-        [string]$clusterId
+        [string]$clusterId,
+        [parameter(Mandatory=$false)]
+        [switch]$UnProtectedObjects
+
     )
     try{
       $variables = "{
-        `"isMultitenancyEnabled`": true,
         `"first`": 200,
         `"filter`": [
           {
@@ -216,6 +227,73 @@ function Get-MssqlDbs{
           }
         ]
       }"
+      if($UnProtectedHosts){
+        $variables = "{
+            `"first`": 200,
+            `"filter`": [
+                {
+                    `"field`": `"PHYSICAL_HOST_BY_MSSQL_EFFECTIVE_SLA`",
+                    `"texts`": [
+                      `"Unprotected`"
+                    ]
+                  },
+              {
+                `"field`": `"CLUSTER_ID`",
+                `"texts`": [
+                  `"$clusterId`"
+                ]
+              },
+              {
+                `"field`": `"IS_RELIC`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_REPLICATED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ],
+            `"sortBy`": `"NAME`",
+            `"sortOrder`": `"ASC`",
+            `"instanceDescendantFilter`": [
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ],
+            `"databaseDescendantFilter`": [
+              {
+                `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_MOUNT`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ]
+          }"
+      }
       $query = "query MssqlHostHierarchyHostListQuery(`$first: Int!, `$after: String, `$filter: [Filter!], `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isMultitenancyEnabled: Boolean = false, `$instanceDescendantFilter: [Filter!], `$databaseDescendantFilter: [Filter!]) {
         mssqlTopLevelDescendants(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, typeFilter: [PhysicalHost]) {
           edges {
@@ -397,7 +475,6 @@ function Get-MssqlDbs{
         $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
         Write-Host ("Looking at End Cursor " + $endCursor)
         $variables = "{
-          `"isMultitenancyEnabled`": true,
           `"first`": 200,
           `"filter`": [
             {
@@ -457,6 +534,74 @@ function Get-MssqlDbs{
           ],
           `"after`": `"${endCursor}`"
         }"
+        if($UnProtectedHosts){
+            $variables = "{
+                `"first`": 200,
+                `"filter`": [
+                    {
+                        `"field`": `"PHYSICAL_HOST_BY_MSSQL_EFFECTIVE_SLA`",
+                        `"texts`": [
+                          `"Unprotected`"
+                        ]
+                      },
+                  {
+                    `"field`": `"CLUSTER_ID`",
+                    `"texts`": [
+                      `"$clusterId`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_RELIC`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_REPLICATED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"sortBy`": `"NAME`",
+                `"sortOrder`": `"ASC`",
+                `"instanceDescendantFilter`": [
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"databaseDescendantFilter`": [
+                  {
+                    `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_MOUNT`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"after`": `"${endCursor}`"
+              }"
+        }
         $JSON_BODY = @{
             "variables" = $variables
             "query" = $query
@@ -473,7 +618,7 @@ function Get-MssqlDbs{
       Write-Output $snappableInfo
     }
   }
-  function Register-Host{
+function Register-Host{
     [CmdletBinding()]
     param (
         [parameter(Mandatory=$true)]
@@ -536,6 +681,929 @@ function Get-MssqlDbs{
             Write-Output $jobErrors
           } 
   }
+function Set-mssqlSlas{
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$slaId,
+        [parameter(Mandatory=$true)]
+        [string]$ObjectIds
+    )
+
+    $variables = "{
+        `"input`": {
+          `"updateInfo`": {
+            `"ids`": ${objectIds},
+            `"existingSnapshotRetention`": `"EXISTING_SNAPSHOT_RETENTION_RETAIN_SNAPSHOTS`",
+            `"mssqlSlaPatchProperties`": {
+              `"configuredSlaDomainId`": `"$slaId`",
+              `"mssqlSlaRelatedProperties`": {
+                `"copyOnly`": false
+              }
+            }
+          },
+          `"userNote`": `"`"
+        }
+      }"
+    $query = "mutation AssignMssqlSLAMutation(`$input: AssignMssqlSlaDomainPropertiesAsyncInput!) {
+        assignMssqlSlaDomainPropertiesAsync(input: `$input) {
+          items {
+            objectId
+            __typename
+          }
+          __typename
+        }
+      }"
+      $JSON_BODY = @{
+        "variables" = $variables
+        "query" = $query
+    }
+    $JSON_BODY = $JSON_BODY | ConvertTo-Json
+    $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+
+}  
+function Get-mssqlAGs{
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$clusterId,
+        [parameter(Mandatory=$false)]
+        [switch]$UnProtectedObjects
+    )
+    try{
+        $variables = "{
+            `"first`": 200,
+            `"filter`": [
+              {
+                `"field`": `"IS_RELIC`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_REPLICATED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ],
+            `"sortBy`": `"NAME`",
+            `"sortOrder`": `"ASC`",
+            `"databaseDescendantFilter`": [
+              {
+                `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_MOUNT`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ]
+          }"
+        if($UnProtectedObjects){
+            $variables = "{
+                `"first`": 200,
+                `"filter`": [
+                    {
+                        `"field`": `"EFFECTIVE_SLA_WITH_RETENTION_SLA`",
+                        `"texts`": [
+                          `"Unprotected`"
+                        ]
+                      },
+                  {
+                    `"field`": `"IS_RELIC`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_REPLICATED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"sortBy`": `"NAME`",
+                `"sortOrder`": `"ASC`",
+                `"databaseDescendantFilter`": [
+                  {
+                    `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_MOUNT`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ]
+              }"
+        }
+        $query = "query MssqlAvailabilityGroupListQuery(`$first: Int!, `$after: String, `$filter: [Filter!], `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isMultitenancyEnabled: Boolean = false, `$databaseDescendantFilter: [Filter!]) {
+            mssqlTopLevelDescendants(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, typeFilter: [MssqlAvailabilityGroup]) {
+              edges {
+                cursor
+                node {
+                  id
+                  authorizedOperations
+                  ...MssqlNameColumnFragment
+                  ...AvailabilityGroupDatabaseCopyOnlyColumnFragment
+                  ...AvailabilityGroupMssqlDatabaseCountColumnFragment
+                  ...CdmClusterColumnFragment
+                  ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
+                  ...CdmClusterLabelFragment
+                  ...EffectiveSlaColumnFragment
+                  ...SlaAssignmentColumnFragment
+                  ...AvailabilityGroupInstanceColumnFragment
+                  __typename
+                }
+                __typename
+              }
+              pageInfo {
+                startCursor
+                endCursor
+                hasNextPage
+                hasPreviousPage
+                __typename
+              }
+              __typename
+            }
+          }
+          
+          fragment OrganizationsColumnFragment on HierarchyObject {
+            allOrgs {
+              name
+              __typename
+            }
+            __typename
+          }
+          
+          fragment MssqlNameColumnFragment on HierarchyObject {
+            id
+            name
+            objectType
+            __typename
+          }
+          
+          fragment AvailabilityGroupDatabaseCopyOnlyColumnFragment on MssqlAvailabilityGroup {
+            copyOnly
+            __typename
+          }
+          
+          fragment AvailabilityGroupMssqlDatabaseCountColumnFragment on MssqlAvailabilityGroup {
+            descendantConnection(filter: `$databaseDescendantFilter, typeFilter: [Mssql]) {
+              count
+              __typename
+            }
+            __typename
+          }
+          
+          fragment CdmClusterColumnFragment on CdmHierarchyObject {
+            replicatedObjectCount
+            cluster {
+              id
+              name
+              version
+              status
+              __typename
+            }
+            __typename
+          }
+          
+          fragment CdmClusterLabelFragment on CdmHierarchyObject {
+            cluster {
+              id
+              name
+              version
+              __typename
+            }
+            primaryClusterLocation {
+              id
+              __typename
+            }
+            __typename
+          }
+          
+          fragment EffectiveSlaColumnFragment on HierarchyObject {
+            id
+            effectiveSlaDomain {
+              ...EffectiveSlaDomainFragment
+              ... on GlobalSlaReply {
+                description
+                __typename
+              }
+              __typename
+            }
+            ... on CdmHierarchyObject {
+              pendingSla {
+                ...SLADomainFragment
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          
+          fragment EffectiveSlaDomainFragment on SlaDomain {
+            id
+            name
+            ... on GlobalSlaReply {
+              isRetentionLockedSla
+              __typename
+            }
+            ... on ClusterSlaDomain {
+              fid
+              cluster {
+                id
+                name
+                __typename
+              }
+              isRetentionLockedSla
+              __typename
+            }
+            __typename
+          }
+          
+          fragment SLADomainFragment on SlaDomain {
+            id
+            name
+            ... on ClusterSlaDomain {
+              fid
+              cluster {
+                id
+                name
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          
+          fragment SlaAssignmentColumnFragment on HierarchyObject {
+            slaAssignment
+            __typename
+          }
+          
+          fragment AvailabilityGroupInstanceColumnFragment on MssqlAvailabilityGroup {
+            instances {
+              logicalPath {
+                fid
+                name
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }"
+        $JSON_BODY = @{
+            "variables" = $variables
+            "query" = $query
+        }
+        $snappableInfo = @()
+        $JSON_BODY = $JSON_BODY | ConvertTo-Json
+        $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
+    
+        while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
+            $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
+            Write-Host ("Looking at End Cursor " + $endCursor)
+            $variables = "{
+                `"first`": 200,
+                `"filter`": [
+                  {
+                    `"field`": `"IS_RELIC`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_REPLICATED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"sortBy`": `"NAME`",
+                `"sortOrder`": `"ASC`",
+                `"databaseDescendantFilter`": [
+                  {
+                    `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_MOUNT`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"after`": `"${endCursor}`"
+              }"
+            if($UnProtectedObjects){
+                $variables = "{
+                    `"first`": 200,
+                    `"filter`": [
+                        {
+                            `"field`": `"EFFECTIVE_SLA_WITH_RETENTION_SLA`",
+                            `"texts`": [
+                              `"Unprotected`"
+                            ]
+                          },
+                      {
+                        `"field`": `"IS_RELIC`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_REPLICATED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_ARCHIVED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      }
+                    ],
+                    `"sortBy`": `"NAME`",
+                    `"sortOrder`": `"ASC`",
+                    `"databaseDescendantFilter`": [
+                      {
+                        `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_MOUNT`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_ARCHIVED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      }
+                    ],
+                    `"after`": `"${endCursor}`"
+                  }"
+            }
+            $JSON_BODY = @{
+                "variables" = $variables
+                "query" = $query
+            }
+            $JSON_BODY = $JSON_BODY | ConvertTo-Json
+            $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+            $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
+    
+        }
+    }
+    catch{
+        Write-Error("Error $($_)")
+      }
+      finally{
+        Write-Output $snappableInfo
+      }
+    
+}
+function Get-SLADomains{
+  <#
+  .SYNOPSIS
+  Gathers all the info for SLA domains in a given RSC instance. 
+  #>
+  try{
+      $query = "query SLAListQuery(`$after: String, `$first: Int, `$filter: [GlobalSlaFilterInput!], `$sortBy: SlaQuerySortByField, `$sortOrder: SortOrder, `$shouldShowProtectedObjectCount: Boolean, `$shouldShowPausedClusters: Boolean = false) {
+          slaDomains(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, shouldShowProtectedObjectCount: `$shouldShowProtectedObjectCount, shouldShowPausedClusters: `$shouldShowPausedClusters) {
+            edges {
+              cursor
+              node {
+                name
+                ...AllObjectSpecificConfigsForSLAFragment
+                ...SlaAssignedToOrganizationsFragment
+                ... on ClusterSlaDomain {
+                  id: fid
+                  protectedObjectCount
+                  baseFrequency {
+                    duration
+                    unit
+                    __typename
+                  }
+                  archivalSpecs {
+                    archivalLocationName
+                    __typename
+                  }
+                  archivalSpec {
+                    archivalLocationName
+                    __typename
+                  }
+                  replicationSpecsV2 {
+                    ...DetailedReplicationSpecsV2ForSlaDomainFragment
+                    __typename
+                  }
+                  localRetentionLimit {
+                    duration
+                    unit
+                    __typename
+                  }
+                  snapshotSchedule {
+                    ...SnapshotSchedulesForSlaDomainFragment
+                    __typename
+                  }
+                  isRetentionLockedSla
+                  __typename
+                }
+                ... on GlobalSlaReply {
+                  id
+                  objectTypes
+                  description
+                  protectedObjectCount
+                  baseFrequency {
+                    duration
+                    unit
+                    __typename
+                  }
+                  archivalSpecs {
+                    storageSetting {
+                      id
+                      name
+                      groupType
+                      targetType
+                      __typename
+                    }
+                    archivalLocationToClusterMapping {
+                      cluster {
+                        id
+                        name
+                        __typename
+                      }
+                      location {
+                        id
+                        name
+                        targetType
+                        __typename
+                      }
+                      __typename
+                    }
+                    __typename
+                  }
+                  replicationSpecsV2 {
+                    ...DetailedReplicationSpecsV2ForSlaDomainFragment
+                    __typename
+                  }
+                  localRetentionLimit {
+                    duration
+                    unit
+                    __typename
+                  }
+                  snapshotSchedule {
+                    ...SnapshotSchedulesForSlaDomainFragment
+                    __typename
+                  }
+                  pausedClustersInfo @include(if: `$shouldShowPausedClusters) {
+                    pausedClustersCount
+                    pausedClusters {
+                      id
+                      name
+                      __typename
+                    }
+                    __typename
+                  }
+                  objectTypes
+                  isRetentionLockedSla
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+              hasPreviousPage
+              __typename
+            }
+            __typename
+          }
+        }
+        
+        fragment AllObjectSpecificConfigsForSLAFragment on SlaDomain {
+          objectSpecificConfigs {
+            awsRdsConfig {
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            sapHanaConfig {
+              incrementalFrequency {
+                duration
+                unit
+                __typename
+              }
+              differentialFrequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            db2Config {
+              incrementalFrequency {
+                duration
+                unit
+                __typename
+              }
+              differentialFrequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            oracleConfig {
+              frequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              hostLogRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            mongoConfig {
+              logFrequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            mssqlConfig {
+              frequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            oracleConfig {
+              frequency {
+                duration
+                unit
+                __typename
+              }
+              logRetention {
+                duration
+                unit
+                __typename
+              }
+              hostLogRetention {
+                duration
+                unit
+                __typename
+              }
+              __typename
+            }
+            vmwareVmConfig {
+              logRetentionSeconds
+              __typename
+            }
+            azureSqlDatabaseDbConfig {
+              logRetentionInDays
+              __typename
+            }
+            azureSqlManagedInstanceDbConfig {
+              logRetentionInDays
+              __typename
+            }
+            awsNativeS3SlaConfig {
+              continuousBackupRetentionInDays
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        
+        fragment SnapshotSchedulesForSlaDomainFragment on SnapshotSchedule {
+          minute {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            __typename
+          }
+          hourly {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            __typename
+          }
+          daily {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            __typename
+          }
+          weekly {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            dayOfWeek
+            __typename
+          }
+          monthly {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            dayOfMonth
+            __typename
+          }
+          quarterly {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            dayOfQuarter
+            quarterStartMonth
+            __typename
+          }
+          yearly {
+            basicSchedule {
+              frequency
+              retention
+              retentionUnit
+              __typename
+            }
+            dayOfYear
+            yearStartMonth
+            __typename
+          }
+          __typename
+        }
+        
+        fragment DetailedReplicationSpecsV2ForSlaDomainFragment on ReplicationSpecV2 {
+          replicationLocalRetentionDuration {
+            duration
+            unit
+            __typename
+          }
+          cascadingArchivalSpecs {
+            archivalTieringSpec {
+              coldStorageClass
+              shouldTierExistingSnapshots
+              minAccessibleDurationInSeconds
+              isInstantTieringEnabled
+              __typename
+            }
+            archivalLocation {
+              id
+              name
+              targetType
+              ... on RubrikManagedAwsTarget {
+                immutabilitySettings {
+                  lockDurationDays
+                  __typename
+                }
+                __typename
+              }
+              ... on RubrikManagedAzureTarget {
+                immutabilitySettings {
+                  lockDurationDays
+                  __typename
+                }
+                __typename
+              }
+              ... on CdmManagedAwsTarget {
+                immutabilitySettings {
+                  lockDurationDays
+                  __typename
+                }
+                __typename
+              }
+              ... on CdmManagedAzureTarget {
+                immutabilitySettings {
+                  lockDurationDays
+                  __typename
+                }
+                __typename
+              }
+              ... on RubrikManagedRcsTarget {
+                immutabilityPeriodDays
+                syncStatus
+                tier
+                __typename
+              }
+              ... on RubrikManagedS3CompatibleTarget {
+                immutabilitySetting {
+                  bucketLockDurationDays
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+            frequency
+            archivalThreshold {
+              duration
+              unit
+              __typename
+            }
+            __typename
+          }
+          retentionDuration {
+            duration
+            unit
+            __typename
+          }
+          cluster {
+            id
+            name
+            version
+            __typename
+          }
+          targetMapping {
+            id
+            name
+            targets {
+              id
+              name
+              cluster {
+                id
+                name
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          awsTarget {
+            accountId
+            accountName
+            region
+            __typename
+          }
+          azureTarget {
+            region
+            __typename
+          }
+          __typename
+        }
+        
+        fragment SlaAssignedToOrganizationsFragment on SlaDomain {
+          ... on GlobalSlaReply {
+            allOrgsWithAccess {
+              id
+              name
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }"
+      $variables = "{
+          `"shouldShowPausedClusters`": true,
+          `"filter`": [],
+          `"sortBy`": `"NAME`",
+          `"sortOrder`": `"ASC`",
+          `"shouldShowProtectedObjectCount`": true,
+          `"first`": 200
+      }"
+      $JSON_BODY = @{
+          "variables" = $variables
+          "query" = $query
+      }
+
+      $SlaInfo = @()
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $SlaInfo += (((($result.content | convertFrom-Json).data).slaDomains).edges).node
+
+      while ((((($result.content | convertFrom-Json).data).slaDomains).pageInfo).hasNextPage -eq $true){
+      $endCursor = (((($result.content | convertFrom-Json).data).slaDomains).pageInfo).endCursor
+      Write-Host ("Looking at End Cursor " + $endCursor)
+      $variables = "{
+        `"shouldShowPausedClusters`": true,
+        `"filter`": [],
+        `"sortBy`": `"NAME`",
+        `"sortOrder`": `"ASC`",
+        `"shouldShowProtectedObjectCount`": true,
+        `"first`": 200,
+        `"after`": `"${endCursor}`"
+      }"
+
+    $JSON_BODY = @{
+        "variables" = $variables
+        "query" = $query
+      }
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $SlaInfo += (((($result.content | convertFrom-Json).data).slaDomains).edges).node
+      }
+  }
+  catch{
+      Write-Error("Error $($_)")
+  }
+  finally{
+      Write-Output $SlaInfo
+  }
+}
+
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $polSession = connect-rsc
 $rubtok = $polSession.access_token
@@ -579,6 +1647,60 @@ if($OnboardHosts){
     if((-not ([string]::IsNullOrEmpty($MissinghostList)))){
         Write-Host ("Writing CSV file to "  + $Output_directory + "/MissingHostsReport_" + $clusterName + "_" +$mdate + ".csv")
         $MissinghostList | Export-Csv -NoTypeInformation ($Output_directory + "/MissingHostsReport_" + $clusterName + "_" +$mdate + ".csv")
+    }
+    Write-Host "Disconnecting From Rubrik Security Cloud."
+    disconnect-rsc
+}
+if($OnboardMSSQL){
+    $hostlist = Import-Csv $CSV
+    $hostlistCount = ($hostlist | Measure-Object).Count
+    $Output_directory = (Get-Location).path
+    $mdate = (Get-Date).tostring("yyyyMMddHHmm")
+
+    $IndexCount = 1
+    $MissingHostList = @()
+    # Get a List of Current MSSQL Hosts and DBs that are unprotected 
+    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
+    $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
+    $AssignmentObjects = @()
+
+    #Map back to existing Availability Groups within RSC based on hosts included in the CSV
+    ## Need to check for Failover clusters if needed.
+    ForEach($objectName in $hostlist){
+        $AGMatch = @()
+        ForEach($AG in $AGInfo){
+            if((($AG.instances).logicalPath).name -contains $objectName.fqdn){
+                $AGMatch += $AG
+            }
+        }
+        $AssignmentObjects += $AGMatch
+        ForEach($SQLHost in $sqlHostInfo){
+            if(($SQLHost).name -eq $objectName.fqdn){
+                $AssignmentObjects += $SQLHost
+            }
+        }
+    }   
+    $SLAList = Get-SLADomains
+    <#
+    ###############################################################################################################################################################
+      Need to work out how to map the specific SLAs to a specified tier. At the moment we are just generating a list of all SLAs and then iterating through the 
+      list of objects pairing them with a random SLA. This will be modified to pair specific tiers to specific SLAs
+    ###############################################################################################################################################################
+    #>
+
+
+    $SLACount = 0
+
+    ##Right now this maps each host to a random SLA. DO NOT USE YET
+    foreach($Object in $AssignmentObjects){
+        Write-Output "Assigning SLA " + $($SLAList[$SLACount]) + " to Object $object.name"
+        $objectId = $object.id | ConvertTo-Json
+        Set-mssqlSlas -ObjectIds $objectId -slaId $SLAList[$SLACount]
+
+        $SLACount+=1
+        if($SLACount -eq $SLAList.count){
+            $SLACount=0
+        }
     }
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
