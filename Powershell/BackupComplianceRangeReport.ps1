@@ -24,7 +24,7 @@ This will generate a list of objects and their compliance status over the last 7
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> in collaboration with Reggie Hobbs
     Created : March 30, 2023
-    Last Edit : December 21, 2023
+    Last Edit : March 05, 2024
     Company : Rubrik Inc
 #>
 
@@ -40,8 +40,826 @@ param (
     [parameter(Mandatory=$false)]
     [string]$SlaIds,
     [parameter(Mandatory=$false)]
-    [switch]$CSV
+    [switch]$CSV,
+    [parameter(Mandatory=$false)]
+    [switch]$debugSingle,
+    [parameter(Mandatory=$false)]
+    [string]$snappableId
 )
+
+function connect-polaris {
+
+  # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
+
+  [CmdletBinding()]
+
+  param (
+
+      # Service account JSON file
+
+  )
+
+ 
+
+  begin {
+
+      # Parse the JSON and build the connection string
+
+      #$serviceAccountObj 
+
+      $connectionData = [ordered]@{
+
+          'client_id' = $serviceAccountObj.client_id
+
+          'client_secret' = $serviceAccountObj.client_secret
+
+      } | ConvertTo-Json
+
+  }
+
+ 
+
+  process {
+
+      try{
+
+          $polaris = Invoke-RestMethod -Method Post -uri $serviceAccountObj.access_token_uri -ContentType application/json -body $connectionData
+
+      }
+
+      catch [System.Management.Automation.ParameterBindingException]{
+
+          Write-Error("The provided JSON has null or empty fields, try the command again with the correct file or redownload the service account JSON from Polaris")
+
+      }
+
+  }
+
+ 
+
+  end {
+
+          if($polaris.access_token){
+
+              Write-Output $polaris
+
+          } else {
+
+              Write-Error("Unable to connect")
+
+          }
+
+         
+
+      }
+
+}
+function disconnect-polaris {
+
+  # Closes the session with the session token passed here
+
+  [CmdletBinding()]
+
+  param (
+  )
+
+ 
+
+  begin {
+
+
+
+  }
+
+ 
+
+  process {
+
+      try{
+
+          $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
+
+      }
+
+      catch [System.Management.Automation.ParameterBindingException]{
+
+          Write-Error("Failed to logout. Error $($_)")
+
+      }
+
+  }
+
+ 
+
+  end {
+
+          if({$closeStatus -eq 204}){
+
+              Write-Output("Successfully logged out")
+
+          } else {
+
+              Write-Error("Error $($_)")
+
+          }
+
+      }
+
+}
+function Get-ClusterInfo{
+  try{
+      $query = "query ClusterListTableQuery(`$first: Int, `$after: String, `$filter: ClusterFilterInput, `$sortBy: ClusterSortByEnum, `$sortOrder: SortOrder, `$showOrgColumn: Boolean = false) {
+          clusterConnection(filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, first: `$first, after: `$after) {
+            edges {
+              cursor
+              node {
+                id
+                ...ClusterListTableFragment
+                ...OrganizationClusterFragment @include(if: `$showOrgColumn)
+              }
+            }
+            pageInfo {
+              startCursor
+              endCursor
+              hasNextPage
+              hasPreviousPage
+            }
+            count
+          }
+        }
+        
+        fragment OrganizationClusterFragment on Cluster {
+          allOrgs {
+            name
+          }
+        }
+        
+        fragment ClusterListTableFragment on Cluster {
+          id
+          name
+          pauseStatus
+          defaultAddress
+          ccprovisionInfo {
+            progress
+            jobStatus
+            jobType
+            __typename
+          }
+          estimatedRunway
+          geoLocation {
+            address
+            __typename
+          }
+          ...ClusterCardSummaryFragment
+          ...ClusterNodeConnectionFragment
+          ...ClusterStateFragment
+          ...ClusterGlobalManagerFragment
+          ...ClusterAuthorizedOperationsFragment
+          ...ClusterVersionColumnFragment
+          ...ClusterTypeColumnFragment
+          ...ClusterCapacityColumnFragment
+        }
+        
+        fragment ClusterCardSummaryFragment on Cluster {
+          status
+          systemStatus
+          systemStatusAffectedNodes {
+            id
+          }
+          clusterNodeConnection {
+            count
+          }
+          lastConnectionTime
+        }
+        
+        fragment ClusterNodeConnectionFragment on Cluster {
+          clusterNodeConnection {
+            nodes {
+              id
+              status
+              ipAddress
+            }
+          }
+        }
+        
+        fragment ClusterStateFragment on Cluster {
+          state {
+            connectedState
+            clusterRemovalState
+          }
+        }
+        
+        fragment ClusterGlobalManagerFragment on Cluster {
+          passesConnectivityCheck
+          globalManagerConnectivityStatus {
+            urls {
+              url
+              isReachable
+            }
+          }
+          connectivityLastUpdated
+        }
+        
+        fragment ClusterAuthorizedOperationsFragment on Cluster {
+          authorizedOperations {
+            id
+            operations
+          }
+        }
+        
+        fragment ClusterVersionColumnFragment on Cluster {
+          version
+        }
+        
+        fragment ClusterTypeColumnFragment on Cluster {
+          name
+          productType
+          type
+          clusterNodeConnection {
+            nodes {
+              id
+            }
+          }
+        }
+        
+        fragment ClusterCapacityColumnFragment on Cluster {
+          metric {
+            usedCapacity
+            availableCapacity
+            totalCapacity
+          }
+        }"
+      
+      $variables = "{
+          `"showOrgColumn`": true,
+          `"sortBy`": `"ClusterName`",
+          `"sortOrder`": `"ASC`",
+          `"filter`": {
+            `"id`": [],
+            `"name`": [
+              `"`"
+            ],
+            `"type`": [],
+            `"orgId`": []
+          }
+        }"
+      
+      
+      $JSON_BODY = @{
+          "variables" = $variables
+          "query" = $query
+      }
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $clusterInfo = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $clusterInfo = (((($clusterInfo.content | ConvertFrom-Json).data).clusterConnection).edges).node | where-object{$_.productType -ne "DATOS"}
+      #$clusterList = $clusterInfo.id | ConvertTo-Json
+  }
+  catch{
+      Write-Error("Error $($_)")
+  }
+      Write-Output $clusterInfo
+}
+function Get-ProtectionTaskDetails{
+  
+  Try{
+      #Set Timeframe to scan based on $DaysToReport
+      $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
+      $currentDate = (Get-Date -Format $InFormat)
+      $startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
+      $protectionTaskDetailsData = @()
+
+      <#
+      Can add
+          "slaDomain": {
+            "id": [
+             `"${slaList}`""
+            ]
+
+      to the variables section if filtering based on SLA is desired
+
+      #>
+      $variables = "{
+          `"first`": 200,
+          `"filter`": {
+            `"time_gt`": `"${startDate}`",
+            `"time_lt`": `"${currentDate}`",
+            `"clusterUuid`": ${clusterList},
+            `"taskCategory`": [
+              `"Protection`"
+            ],
+            `"taskType`": [
+            `"Backup`"
+          ],
+            `"orgId`": []
+          },
+          `"sortBy`": `"EndTime`",
+          `"sortOrder`": `"DESC`"
+        }"
+        $query = "query ProtectionTaskDetailTableQuery(`$first: Int!, `$after: String, `$filter: TaskDetailFilterInput, `$sortBy: TaskDetailSortByEnum, `$sortOrder: SortOrder) {
+          taskDetailConnection(first: `$first, after: `$after, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder) {
+            edges {
+              cursor
+              node {
+                id
+                clusterUuid
+                clusterName
+                taskType
+                status
+                objectName
+                objectType
+                location
+                clusterLocation
+                slaDomainName
+                replicationSource
+                replicationTarget
+                archivalTarget
+                directArchive
+                failureReason
+                snapshotConsistency
+                protectedVolume
+                startTime
+                endTime
+                duration
+                dataTransferred
+                totalFilesTransferred
+                physicalBytes
+                logicalBytes
+                dedupRatio
+                logicalDedupRatio
+                dataReduction
+                logicalDataReduction
+                orgId
+                orgName
+              }
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+          }
+        }"
+      $JSON_BODY = @{
+          "variables" = $variables
+          "query" = $query
+      }
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $protectionTaskDetailsData += ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).edges).node
+
+      while (((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).hasNextPage -eq $true){
+          $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
+          Write-Host ("Looking at End Cursor " + $endCursor)
+          $variables = "{
+              `"first`": 200,
+              `"filter`": {
+                  `"time_gt`": `"${startDate}`",
+                  `"time_lt`": `"${currentDate}`",
+                  `"clusterUuid`": ${clusterList},
+                `"taskCategory`": [
+                  `"Protection`"
+                ],
+                `"taskType`": [
+                  `"Backup`"
+                ],
+                `"orgId`": []
+              },
+              `"sortBy`": `"EndTime`",
+              `"sortOrder`": `"DESC`",
+              `"after`": `"${endCursor}`"
+            }"
+          $JSON_BODY = @{
+              "variables" = $variables
+              "query" = $query
+          }
+          $JSON_BODY = $JSON_BODY | ConvertTo-Json
+          $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+          $protectionTaskDetailsData += ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).edges).node 
+      }
+  }
+
+  Catch{
+      Write-Error("Error $($_)")
+  }
+  End{
+      Write-Output $protectionTaskDetailsData
+  }
+}
+function get-info{
+  process {
+
+      try {
+        if(!($SlaIDs)){
+          #Blank SLAs filter results in NO RESULTS
+          $variables = "{
+            `"first`": 200,
+            `"filter`": {
+              `"cluster`": {
+                `"id`": $clusterId
+              },
+              `"complianceStatus`": [
+                `"IN_COMPLIANCE`",
+                `"OUT_OF_COMPLIANCE`",
+                `"NOT_AVAILABLE`"
+              ],
+              `"protectionStatus`": [],
+              `"slaTimeRange`": `"${daysToReport}`",
+              `"orgId`": []
+            },
+            `"sortBy`": `"Name`",
+            `"sortOrder`": `"ASC`"
+          }"
+        }
+        if($SlaIDs){
+          #Need to address parsing SLAIDs single vs multiple
+
+          $SlaIDs = $SlaIDs.Split(",")
+          $SlaIDs = $SlaIDs | ConvertTo-Json
+          $variables = "{
+            `"first`": 200,
+            `"filter`": {
+              `"cluster`": {
+                `"id`": $clusterId
+              },
+              `"complianceStatus`": [
+                `"IN_COMPLIANCE`",
+                `"OUT_OF_COMPLIANCE`",
+                `"NOT_AVAILABLE`"
+              ],
+              `"protectionStatus`": [],
+              `"slaDomain`": {
+                `"id`": $SlaIDs
+                },  
+              `"slaTimeRange`": `"${daysToReport}`",
+              `"orgId`": []
+            },
+            `"sortBy`": `"Name`",
+            `"sortOrder`": `"ASC`"
+          }"
+        }
+          if($ClusterId -ne "[]") {
+            Write-Host ("Gathering Compliance Info for clusters " + $clusterId)
+          }
+          
+
+          $query = "query ComplianceTableQuery(`$first: Int!, `$filter: SnappableFilterInput, `$after: String, `$sortBy: SnappableSortByEnum, `$sortOrder: SortOrder) {
+              snappableConnection(first: `$first, filter: `$filter, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    name
+                    cluster {
+                      id
+                      name
+                      id
+                    }
+                    slaDomain {
+                      id
+                      name
+                      ... on GlobalSlaReply {
+                        isRetentionLockedSla
+                      }
+                      ... on ClusterSlaDomain {
+                        isRetentionLockedSla
+                      }
+                    }
+                    location
+                    complianceStatus
+                    localSnapshots
+                    replicaSnapshots
+                    archiveSnapshots
+                    totalSnapshots
+                    missedSnapshots
+                    lastSnapshot
+                    latestArchivalSnapshot
+                    latestReplicationSnapshot
+                    objectType
+                    fid
+                    localOnDemandSnapshots
+                    localSlaSnapshots
+                    archivalSnapshotLag
+                    replicationSnapshotLag
+                    archivalComplianceStatus
+                    replicationComplianceStatus
+                    awaitingFirstFull
+                    pullTime
+                    orgName
+                  }
+                }
+                pageInfo {
+                  endCursor
+                  hasNextPage
+                }
+              }
+            }"
+            $JSON_BODY = @{
+              "variables" = $variables
+              "query" = $query
+          }
+          $JSON_BODY = $JSON_BODY | ConvertTo-Json
+          
+          $snappableInfo = @()
+          $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+          $snappableInfo += (((($info.content |ConvertFrom-Json).data).snappableConnection).edges).node
+          
+          while ((((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).hasNextPage -eq $true){
+              $endCursor = (((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).endCursor
+              Write-Host ("Paging through another 200 Objects. Looking at End Cursor " + $endCursor)
+              if(!($SlaIDs)){
+                $variables = "{
+                  `"first`": 200,
+                  `"filter`": {
+                    `"cluster`": {
+                      `"id`": $clusterId
+                    },
+                    `"complianceStatus`": [
+                      `"IN_COMPLIANCE`",
+                      `"OUT_OF_COMPLIANCE`",
+                      `"NOT_AVAILABLE`"
+                    ],
+                    `"protectionStatus`": [],
+                    `"slaTimeRange`": `"${daysToReport}`",
+                    `"orgId`": []
+                  },
+                  `"sortBy`": `"Name`",
+                  `"sortOrder`": `"ASC`",
+                  `"after`": `"${endCursor}`"
+                }"
+              }
+              if($SlaIDs){
+                $variables = "{
+                  `"first`": 200,
+                  `"filter`": {
+                    `"cluster`": {
+                      `"id`": $clusterId
+                    },
+                    `"complianceStatus`": [
+                      `"IN_COMPLIANCE`",
+                      `"OUT_OF_COMPLIANCE`",
+                      `"NOT_AVAILABLE`"
+                    ],
+                    `"protectionStatus`": [],
+                    `"slaDomain`": {
+                      `"id`": $SlaIDs
+                      },  
+                    `"slaTimeRange`": `"${daysToReport}`",
+                    `"orgId`": []
+                  },
+                  `"sortBy`": `"Name`",
+                  `"sortOrder`": `"ASC`",
+                  `"after`": `"${endCursor}`"
+                }"
+              }
+              $JSON_BODY = @{
+                  "variables" = $variables
+                  "query" = $query
+              }
+              $JSON_BODY = $JSON_BODY | ConvertTo-Json
+              $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+              $snappableInfo += (((($info.content |ConvertFrom-Json).data).snappableConnection).edges).node
+          }
+
+      }
+
+      Catch{
+
+          Write-Error("Error $($_)")
+
+      }
+
+  }
+
+  End {
+
+      Write-Output $snappableInfo
+
+  }
+
+}
+function get-SnapshotInfo{
+  [CmdletBinding()]
+
+  param (
+      [parameter(Mandatory=$true)]
+      [string]$snappableId
+      #snappableId = FID, not ID
+  )
+  process {
+      try{
+          $snappableInfo = @()
+          $variables = "{
+              `"snappableId`": `"${snappableId}`",
+              `"first`": 50,
+              `"sortBy`": `"CREATION_TIME`",
+              `"sortOrder`": `"DESC`",
+              `"snapshotFilter`": [
+                {
+                  `"field`": `"SNAPSHOT_TYPE`",
+                  `"typeFilters`": []
+                },
+                {
+                  `"field`": `"IS_LEGALLY_HELD`",
+                  `"text`": `"false`"
+                }
+              ],
+              `"timeRange`": {
+                  `"start`": `"${startDate}`",
+                  `"end`": `"${currentDate}`"
+                }
+            }"
+
+          $query = "query SnapshotsListSingleQuery(`$snappableId: String!, `$first: Int, `$after: String, `$snapshotFilter: [SnapshotQueryFilterInput!], `$sortBy: SnapshotQuerySortByField, `$sortOrder: SortOrder, `$timeRange: TimeRangeInput) {
+              snapshotsListConnection: snapshotOfASnappableConnection(workloadId: `$snappableId, first: `$first, after: `$after, snapshotFilter: `$snapshotFilter, sortBy: `$sortBy, sortOrder: `$sortOrder, timeRange: `$timeRange) {
+                edges {
+                  cursor
+                  node {
+                    ...CdmSnapshotLatestUserNotesFragment
+                    id
+                    date
+                    expirationDate
+                    isOnDemandSnapshot
+                    ... on CdmSnapshot {
+                      cdmVersion
+                      isRetentionLocked
+                      isDownloadedSnapshot
+                      cluster {
+                        id
+                        name
+                        version
+                        status
+                        timezone
+                      }
+                      pendingSnapshotDeletion {
+                        id: snapshotFid
+                        status
+                      }
+                      slaDomain {
+                        ...EffectiveSlaDomainFragment
+                      }
+                      pendingSla {
+                        ...SLADomainFragment
+                      }
+                      snapshotRetentionInfo {
+                        isCustomRetentionApplied
+                        archivalInfos {
+                          name
+                          isExpirationDateCalculated
+                          expirationTime
+                          locationId
+                        }
+                        localInfo {
+                          name
+                          isExpirationDateCalculated
+                          expirationTime
+                        }
+                        replicationInfos {
+                          name
+                          isExpirationDateCalculated
+                          expirationTime
+                          locationId
+                          isExpirationInformationUnavailable
+                        }
+                      }
+                      sapHanaAppMetadata {
+                        backupId
+                        backupPrefix
+                        snapshotType
+                        files {
+                          backupFileSizeInBytes
+                        }
+                      }
+                      legalHoldInfo {
+                        shouldHoldInPlace
+                      }
+                    }
+                    ... on PolarisSnapshot {
+                      isDeletedFromSource
+                      isDownloadedSnapshot
+                      isReplica
+                      isArchivalCopy
+                      slaDomain {
+                        name
+                        ... on ClusterSlaDomain {
+                          fid
+                          cluster {
+                            id
+                            name
+                          }
+                        }
+                        ... on GlobalSlaReply {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  endCursor
+                  hasNextPage
+                }
+              }
+            }
+
+            fragment EffectiveSlaDomainFragment on SlaDomain {
+              id
+              name
+              ... on GlobalSlaReply {
+                isRetentionLockedSla
+              }
+              ... on ClusterSlaDomain {
+                fid
+                cluster {
+                  id
+                  name
+                }
+                isRetentionLockedSla
+              }
+            }
+
+            fragment SLADomainFragment on SlaDomain {
+              id
+              name
+              ... on ClusterSlaDomain {
+                fid
+                cluster {
+                  id
+                  name
+                }
+              }
+            }
+
+            fragment CdmSnapshotLatestUserNotesFragment on CdmSnapshot {
+              latestUserNote {
+                time
+                userName
+                userNote
+              }
+            }"
+            $JSON_BODY = @{
+              "variables" = $variables
+              "query" = $query
+          }
+          $JSON_BODY = $JSON_BODY | ConvertTo-Json
+          $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+          $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
+
+          while ((((($result.content | ConvertFrom-Json).data).snapshotsListConnection).pageInfo).hasNextPage -eq $true){
+              $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
+              Write-Host ("Paging through another 50 snapshots. Looking at End Cursor " + $endCursor)
+              $variables = "{
+                  `"snappableId`": `"${snappableId}`",
+                  `"first`": 50,
+                  `"sortBy`": `"CREATION_TIME`",
+                  `"sortOrder`": `"DESC`",
+                  `"snapshotFilter`": [
+                    {
+                      `"field`": `"SNAPSHOT_TYPE`",
+                      `"typeFilters`": []
+                    },
+                    {
+                      `"field`": `"IS_LEGALLY_HELD`",
+                      `"text`": `"false`"
+                    }
+                  ],
+                  `"timeRange`": {
+                      `"start`": `"${startDate}`",
+                      `"end`": `"${currentDate}`"
+                    },
+                  `"after`": `"${endCursor}`"
+                }"
+              $JSON_BODY = @{
+                  "variables" = $variables
+                  "query" = $query
+              }
+              $JSON_BODY = $JSON_BODY | ConvertTo-Json
+              $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+              $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node 
+          }
+
+      }
+
+      Catch{
+          Write-Error("Error $($_)")
+      }
+  }
+  End{
+      Write-Output $snappableInfo
+  }
+
+}
+Function Get-DateRange{ 
+  #Function taken from https://thesurlyadmin.com/2014/07/25/quick-script-date-ranges/  
+  [CmdletBinding()]
+  Param (
+      [datetime]$Start = (Get-Date),
+      [datetime]$End = (Get-Date)
+  )
+  
+  ForEach ($Num in (0..((New-TimeSpan –Start $Start –End $End).Days)))
+  {   $Start.AddDays($Num)
+  }
+}
+
 
 #Add ClusterId field for end report for filter/sorting options
 #Look at cluster count calculation 
@@ -100,818 +918,6 @@ else{
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $Output_directory = (Get-Location).path
 $mdate = (Get-Date).tostring("yyyyMMddHHmm")
-function connect-polaris {
-
-    # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
-
-    [CmdletBinding()]
-
-    param (
-
-        # Service account JSON file
-
-    )
-
-   
-
-    begin {
-
-        # Parse the JSON and build the connection string
-
-        #$serviceAccountObj 
-
-        $connectionData = [ordered]@{
-
-            'client_id' = $serviceAccountObj.client_id
-
-            'client_secret' = $serviceAccountObj.client_secret
-
-        } | ConvertTo-Json
-
-    }
-
-   
-
-    process {
-
-        try{
-
-            $polaris = Invoke-RestMethod -Method Post -uri $serviceAccountObj.access_token_uri -ContentType application/json -body $connectionData
-
-        }
-
-        catch [System.Management.Automation.ParameterBindingException]{
-
-            Write-Error("The provided JSON has null or empty fields, try the command again with the correct file or redownload the service account JSON from Polaris")
-
-        }
-
-    }
-
-   
-
-    end {
-
-            if($polaris.access_token){
-
-                Write-Output $polaris
-
-            } else {
-
-                Write-Error("Unable to connect")
-
-            }
-
-           
-
-        }
-
-}
-function disconnect-polaris {
-
-    # Closes the session with the session token passed here
-
-    [CmdletBinding()]
-
-    param (
-    )
-
-   
-
-    begin {
-
- 
-
-    }
-
-   
-
-    process {
-
-        try{
-
-            $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
-
-        }
-
-        catch [System.Management.Automation.ParameterBindingException]{
-
-            Write-Error("Failed to logout. Error $($_)")
-
-        }
-
-    }
-
-   
-
-    end {
-
-            if({$closeStatus -eq 204}){
-
-                Write-Output("Successfully logged out")
-
-            } else {
-
-                Write-Error("Error $($_)")
-
-            }
-
-        }
-
-}
-function Get-ClusterInfo{
-    try{
-        $query = "query ClusterListTableQuery(`$first: Int, `$after: String, `$filter: ClusterFilterInput, `$sortBy: ClusterSortByEnum, `$sortOrder: SortOrder, `$showOrgColumn: Boolean = false) {
-            clusterConnection(filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, first: `$first, after: `$after) {
-              edges {
-                cursor
-                node {
-                  id
-                  ...ClusterListTableFragment
-                  ...OrganizationClusterFragment @include(if: `$showOrgColumn)
-                }
-              }
-              pageInfo {
-                startCursor
-                endCursor
-                hasNextPage
-                hasPreviousPage
-              }
-              count
-            }
-          }
-          
-          fragment OrganizationClusterFragment on Cluster {
-            allOrgs {
-              name
-            }
-          }
-          
-          fragment ClusterListTableFragment on Cluster {
-            id
-            name
-            pauseStatus
-            defaultAddress
-            ccprovisionInfo {
-              progress
-              jobStatus
-              jobType
-              __typename
-            }
-            estimatedRunway
-            geoLocation {
-              address
-              __typename
-            }
-            ...ClusterCardSummaryFragment
-            ...ClusterNodeConnectionFragment
-            ...ClusterStateFragment
-            ...ClusterGlobalManagerFragment
-            ...ClusterAuthorizedOperationsFragment
-            ...ClusterVersionColumnFragment
-            ...ClusterTypeColumnFragment
-            ...ClusterCapacityColumnFragment
-          }
-          
-          fragment ClusterCardSummaryFragment on Cluster {
-            status
-            systemStatus
-            systemStatusAffectedNodes {
-              id
-            }
-            clusterNodeConnection {
-              count
-            }
-            lastConnectionTime
-          }
-          
-          fragment ClusterNodeConnectionFragment on Cluster {
-            clusterNodeConnection {
-              nodes {
-                id
-                status
-                ipAddress
-              }
-            }
-          }
-          
-          fragment ClusterStateFragment on Cluster {
-            state {
-              connectedState
-              clusterRemovalState
-            }
-          }
-          
-          fragment ClusterGlobalManagerFragment on Cluster {
-            passesConnectivityCheck
-            globalManagerConnectivityStatus {
-              urls {
-                url
-                isReachable
-              }
-            }
-            connectivityLastUpdated
-          }
-          
-          fragment ClusterAuthorizedOperationsFragment on Cluster {
-            authorizedOperations {
-              id
-              operations
-            }
-          }
-          
-          fragment ClusterVersionColumnFragment on Cluster {
-            version
-          }
-          
-          fragment ClusterTypeColumnFragment on Cluster {
-            name
-            productType
-            type
-            clusterNodeConnection {
-              nodes {
-                id
-              }
-            }
-          }
-          
-          fragment ClusterCapacityColumnFragment on Cluster {
-            metric {
-              usedCapacity
-              availableCapacity
-              totalCapacity
-            }
-          }"
-        
-        $variables = "{
-            `"showOrgColumn`": true,
-            `"sortBy`": `"ClusterName`",
-            `"sortOrder`": `"ASC`",
-            `"filter`": {
-              `"id`": [],
-              `"name`": [
-                `"`"
-              ],
-              `"type`": [],
-              `"orgId`": []
-            }
-          }"
-        
-        
-        $JSON_BODY = @{
-            "variables" = $variables
-            "query" = $query
-        }
-        $JSON_BODY = $JSON_BODY | ConvertTo-Json
-        $clusterInfo = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-        $clusterInfo = (((($clusterInfo.content | ConvertFrom-Json).data).clusterConnection).edges).node | where-object{$_.productType -ne "DATOS"}
-        #$clusterList = $clusterInfo.id | ConvertTo-Json
-    }
-    catch{
-        Write-Error("Error $($_)")
-    }
-        Write-Output $clusterInfo
-}
-function Get-ProtectionTaskDetails{
-    
-    Try{
-        #Set Timeframe to scan based on $DaysToReport
-        $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
-        $currentDate = (Get-Date -Format $InFormat)
-        $startDate = ($currentDate | Get-Date).AddDays("-" + $actualDaysToReport) | Get-Date -Format $InFormat
-        $protectionTaskDetailsData = @()
-
-        <#
-        Can add
-            "slaDomain": {
-              "id": [
-               `"${slaList}`""
-              ]
-
-        to the variables section if filtering based on SLA is desired
-
-        #>
-        $variables = "{
-            `"first`": 200,
-            `"filter`": {
-              `"time_gt`": `"${startDate}`",
-              `"time_lt`": `"${currentDate}`",
-              `"clusterUuid`": ${clusterList},
-              `"taskCategory`": [
-                `"Protection`"
-              ],
-              `"taskType`": [
-              `"Backup`"
-            ],
-              `"orgId`": []
-            },
-            `"sortBy`": `"EndTime`",
-            `"sortOrder`": `"DESC`"
-          }"
-          $query = "query ProtectionTaskDetailTableQuery(`$first: Int!, `$after: String, `$filter: TaskDetailFilterInput, `$sortBy: TaskDetailSortByEnum, `$sortOrder: SortOrder) {
-            taskDetailConnection(first: `$first, after: `$after, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder) {
-              edges {
-                cursor
-                node {
-                  id
-                  clusterUuid
-                  clusterName
-                  taskType
-                  status
-                  objectName
-                  objectType
-                  location
-                  clusterLocation
-                  slaDomainName
-                  replicationSource
-                  replicationTarget
-                  archivalTarget
-                  directArchive
-                  failureReason
-                  snapshotConsistency
-                  protectedVolume
-                  startTime
-                  endTime
-                  duration
-                  dataTransferred
-                  totalFilesTransferred
-                  physicalBytes
-                  logicalBytes
-                  dedupRatio
-                  logicalDedupRatio
-                  dataReduction
-                  logicalDataReduction
-                  orgId
-                  orgName
-                }
-              }
-              pageInfo {
-                endCursor
-                hasNextPage
-              }
-            }
-          }"
-        $JSON_BODY = @{
-            "variables" = $variables
-            "query" = $query
-        }
-        $JSON_BODY = $JSON_BODY | ConvertTo-Json
-        $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-        $protectionTaskDetailsData += ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).edges).node
-
-        while (((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).hasNextPage -eq $true){
-            $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
-            Write-Host ("Looking at End Cursor " + $endCursor)
-            $variables = "{
-                `"first`": 200,
-                `"filter`": {
-                    `"time_gt`": `"${startDate}`",
-                    `"time_lt`": `"${currentDate}`",
-                    `"clusterUuid`": ${clusterList},
-                  `"taskCategory`": [
-                    `"Protection`"
-                  ],
-                  `"taskType`": [
-                    `"Backup`"
-                  ],
-                  `"orgId`": []
-                },
-                `"sortBy`": `"EndTime`",
-                `"sortOrder`": `"DESC`",
-                `"after`": `"${endCursor}`"
-              }"
-            $JSON_BODY = @{
-                "variables" = $variables
-                "query" = $query
-            }
-            $JSON_BODY = $JSON_BODY | ConvertTo-Json
-            $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-            $protectionTaskDetailsData += ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).edges).node 
-        }
-    }
-
-    Catch{
-        Write-Error("Error $($_)")
-    }
-    End{
-        Write-Output $protectionTaskDetailsData
-    }
-}
-function get-info{
-    process {
-
-        try {
-          if(!($SlaIDs)){
-            #Blank SLAs filter results in NO RESULTS
-            $variables = "{
-              `"first`": 200,
-              `"filter`": {
-                `"cluster`": {
-                  `"id`": $clusterId
-                },
-                `"complianceStatus`": [
-                  `"IN_COMPLIANCE`",
-                  `"OUT_OF_COMPLIANCE`",
-                  `"NOT_AVAILABLE`"
-                ],
-                `"protectionStatus`": [],
-                `"slaTimeRange`": `"${daysToReport}`",
-                `"orgId`": []
-              },
-              `"sortBy`": `"Name`",
-              `"sortOrder`": `"ASC`"
-            }"
-          }
-          if($SlaIDs){
-            #Need to address parsing SLAIDs single vs multiple
-
-            $SlaIDs = $SlaIDs.Split(",")
-            $SlaIDs = $SlaIDs | ConvertTo-Json
-            $variables = "{
-              `"first`": 200,
-              `"filter`": {
-                `"cluster`": {
-                  `"id`": $clusterId
-                },
-                `"complianceStatus`": [
-                  `"IN_COMPLIANCE`",
-                  `"OUT_OF_COMPLIANCE`",
-                  `"NOT_AVAILABLE`"
-                ],
-                `"protectionStatus`": [],
-                `"slaDomain`": {
-                  `"id`": $SlaIDs
-                  },  
-                `"slaTimeRange`": `"${daysToReport}`",
-                `"orgId`": []
-              },
-              `"sortBy`": `"Name`",
-              `"sortOrder`": `"ASC`"
-            }"
-          }
-            if($ClusterId -ne "[]") {
-              Write-Host ("Gathering Compliance Info for clusters " + $clusterId)
-            }
-            
-
-            $query = "query ComplianceTableQuery(`$first: Int!, `$filter: SnappableFilterInput, `$after: String, `$sortBy: SnappableSortByEnum, `$sortOrder: SortOrder) {
-                snappableConnection(first: `$first, filter: `$filter, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
-                  edges {
-                    cursor
-                    node {
-                      id
-                      name
-                      cluster {
-                        id
-                        name
-                        id
-                      }
-                      slaDomain {
-                        id
-                        name
-                        ... on GlobalSlaReply {
-                          isRetentionLockedSla
-                        }
-                        ... on ClusterSlaDomain {
-                          isRetentionLockedSla
-                        }
-                      }
-                      location
-                      complianceStatus
-                      localSnapshots
-                      replicaSnapshots
-                      archiveSnapshots
-                      totalSnapshots
-                      missedSnapshots
-                      lastSnapshot
-                      latestArchivalSnapshot
-                      latestReplicationSnapshot
-                      objectType
-                      fid
-                      localOnDemandSnapshots
-                      localSlaSnapshots
-                      archivalSnapshotLag
-                      replicationSnapshotLag
-                      archivalComplianceStatus
-                      replicationComplianceStatus
-                      awaitingFirstFull
-                      pullTime
-                      orgName
-                    }
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-              }"
-              $JSON_BODY = @{
-                "variables" = $variables
-                "query" = $query
-            }
-            $JSON_BODY = $JSON_BODY | ConvertTo-Json
-            
-            $snappableInfo = @()
-            $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-            $snappableInfo += (((($info.content |ConvertFrom-Json).data).snappableConnection).edges).node
-            
-            while ((((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).hasNextPage -eq $true){
-                $endCursor = (((($info.content |ConvertFrom-Json).data).snappableConnection).pageInfo).endCursor
-                Write-Host ("Paging through another 200 Objects. Looking at End Cursor " + $endCursor)
-                if(!($SlaIDs)){
-                  $variables = "{
-                    `"first`": 200,
-                    `"filter`": {
-                      `"cluster`": {
-                        `"id`": $clusterId
-                      },
-                      `"complianceStatus`": [
-                        `"IN_COMPLIANCE`",
-                        `"OUT_OF_COMPLIANCE`",
-                        `"NOT_AVAILABLE`"
-                      ],
-                      `"protectionStatus`": [],
-                      `"slaTimeRange`": `"${daysToReport}`",
-                      `"orgId`": []
-                    },
-                    `"sortBy`": `"Name`",
-                    `"sortOrder`": `"ASC`",
-                    `"after`": `"${endCursor}`"
-                  }"
-                }
-                if($SlaIDs){
-                  $variables = "{
-                    `"first`": 200,
-                    `"filter`": {
-                      `"cluster`": {
-                        `"id`": $clusterId
-                      },
-                      `"complianceStatus`": [
-                        `"IN_COMPLIANCE`",
-                        `"OUT_OF_COMPLIANCE`",
-                        `"NOT_AVAILABLE`"
-                      ],
-                      `"protectionStatus`": [],
-                      `"slaDomain`": {
-                        `"id`": $SlaIDs
-                        },  
-                      `"slaTimeRange`": `"${daysToReport}`",
-                      `"orgId`": []
-                    },
-                    `"sortBy`": `"Name`",
-                    `"sortOrder`": `"ASC`",
-                    `"after`": `"${endCursor}`"
-                  }"
-                }
-                $JSON_BODY = @{
-                    "variables" = $variables
-                    "query" = $query
-                }
-                $JSON_BODY = $JSON_BODY | ConvertTo-Json
-                $info = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-                $snappableInfo += (((($info.content |ConvertFrom-Json).data).snappableConnection).edges).node
-            }
-
-        }
-
-        Catch{
-
-            Write-Error("Error $($_)")
-
-        }
-
-    }
-
-    End {
-
-        Write-Output $snappableInfo
-
-    }
-
-}
-function get-SnapshotInfo{
-    [CmdletBinding()]
-
-    param (
-        [parameter(Mandatory=$true)]
-        [string]$snappableId
-        #snappableId = FID, not ID
-    )
-    process {
-        try{
-            $snappableInfo = @()
-            $variables = "{
-                `"snappableId`": `"${snappableId}`",
-                `"first`": 50,
-                `"sortBy`": `"CREATION_TIME`",
-                `"sortOrder`": `"DESC`",
-                `"snapshotFilter`": [
-                  {
-                    `"field`": `"SNAPSHOT_TYPE`",
-                    `"typeFilters`": []
-                  },
-                  {
-                    `"field`": `"IS_LEGALLY_HELD`",
-                    `"text`": `"false`"
-                  }
-                ],
-                `"timeRange`": {
-                    `"start`": `"${startDate}`",
-                    `"end`": `"${currentDate}`"
-                  }
-              }"
-
-            $query = "query SnapshotsListSingleQuery(`$snappableId: String!, `$first: Int, `$after: String, `$snapshotFilter: [SnapshotQueryFilterInput!], `$sortBy: SnapshotQuerySortByField, `$sortOrder: SortOrder, `$timeRange: TimeRangeInput) {
-                snapshotsListConnection: snapshotOfASnappableConnection(workloadId: `$snappableId, first: `$first, after: `$after, snapshotFilter: `$snapshotFilter, sortBy: `$sortBy, sortOrder: `$sortOrder, timeRange: `$timeRange) {
-                  edges {
-                    cursor
-                    node {
-                      ...CdmSnapshotLatestUserNotesFragment
-                      id
-                      date
-                      expirationDate
-                      isOnDemandSnapshot
-                      ... on CdmSnapshot {
-                        cdmVersion
-                        isRetentionLocked
-                        isDownloadedSnapshot
-                        cluster {
-                          id
-                          name
-                          version
-                          status
-                          timezone
-                        }
-                        pendingSnapshotDeletion {
-                          id: snapshotFid
-                          status
-                        }
-                        slaDomain {
-                          ...EffectiveSlaDomainFragment
-                        }
-                        pendingSla {
-                          ...SLADomainFragment
-                        }
-                        snapshotRetentionInfo {
-                          isCustomRetentionApplied
-                          archivalInfos {
-                            name
-                            isExpirationDateCalculated
-                            expirationTime
-                            locationId
-                          }
-                          localInfo {
-                            name
-                            isExpirationDateCalculated
-                            expirationTime
-                          }
-                          replicationInfos {
-                            name
-                            isExpirationDateCalculated
-                            expirationTime
-                            locationId
-                            isExpirationInformationUnavailable
-                          }
-                        }
-                        sapHanaAppMetadata {
-                          backupId
-                          backupPrefix
-                          snapshotType
-                          files {
-                            backupFileSizeInBytes
-                          }
-                        }
-                        legalHoldInfo {
-                          shouldHoldInPlace
-                        }
-                      }
-                      ... on PolarisSnapshot {
-                        isDeletedFromSource
-                        isDownloadedSnapshot
-                        isReplica
-                        isArchivalCopy
-                        slaDomain {
-                          name
-                          ... on ClusterSlaDomain {
-                            fid
-                            cluster {
-                              id
-                              name
-                            }
-                          }
-                          ... on GlobalSlaReply {
-                            id
-                          }
-                        }
-                      }
-                    }
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-              }
-
-              fragment EffectiveSlaDomainFragment on SlaDomain {
-                id
-                name
-                ... on GlobalSlaReply {
-                  isRetentionLockedSla
-                }
-                ... on ClusterSlaDomain {
-                  fid
-                  cluster {
-                    id
-                    name
-                  }
-                  isRetentionLockedSla
-                }
-              }
-
-              fragment SLADomainFragment on SlaDomain {
-                id
-                name
-                ... on ClusterSlaDomain {
-                  fid
-                  cluster {
-                    id
-                    name
-                  }
-                }
-              }
-
-              fragment CdmSnapshotLatestUserNotesFragment on CdmSnapshot {
-                latestUserNote {
-                  time
-                  userName
-                  userNote
-                }
-              }"
-              $JSON_BODY = @{
-                "variables" = $variables
-                "query" = $query
-            }
-            $JSON_BODY = $JSON_BODY | ConvertTo-Json
-            $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-            $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
-
-            while ((((($result.content | ConvertFrom-Json).data).snapshotsListConnection).pageInfo).hasNextPage -eq $true){
-                $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
-                Write-Host ("Paging through another 50 snapshots. Looking at End Cursor " + $endCursor)
-                $variables = "{
-                    `"snappableId`": `"${snappableId}`",
-                    `"first`": 50,
-                    `"sortBy`": `"CREATION_TIME`",
-                    `"sortOrder`": `"DESC`",
-                    `"snapshotFilter`": [
-                      {
-                        `"field`": `"SNAPSHOT_TYPE`",
-                        `"typeFilters`": []
-                      },
-                      {
-                        `"field`": `"IS_LEGALLY_HELD`",
-                        `"text`": `"false`"
-                      }
-                    ],
-                    `"timeRange`": {
-                        `"start`": `"${startDate}`",
-                        `"end`": `"${currentDate}`"
-                      },
-                    `"after`": `"${endCursor}`"
-                  }"
-                $JSON_BODY = @{
-                    "variables" = $variables
-                    "query" = $query
-                }
-                $JSON_BODY = $JSON_BODY | ConvertTo-Json
-                $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-                $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node 
-            }
-
-        }
-
-        Catch{
-            Write-Error("Error $($_)")
-        }
-    }
-    End{
-        Write-Output $snappableInfo
-    }
-
-}
-Function Get-DateRange{ 
-    #Function taken from https://thesurlyadmin.com/2014/07/25/quick-script-date-ranges/  
-    [CmdletBinding()]
-    Param (
-        [datetime]$Start = (Get-Date),
-        [datetime]$End = (Get-Date)
-    )
-    
-    ForEach ($Num in (0..((New-TimeSpan –Start $Start –End $End).Days)))
-    {   $Start.AddDays($Num)
-    }
-}
 
 #Set Timeframe to scan based on $DaysToReport
 $InFormat = "yyyy-MM-ddTHH:mm:ss.fffZ"
@@ -949,6 +955,26 @@ $Polaris_URL = ($serviceAccountObj.access_token_uri).replace("client_token", "gr
 $logoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "session")
 
 $R2 = get-info
+if($debugSingle){
+  $R2 = $R2 | where-object {$_.fid -eq $snappableId}
+  $DebugBackupList = get-SnapshotInfo -snappableId $snappableId
+  Write-Host ("Writing report file to "  + $Output_directory + "/DebugBackupList" +$mdate + ".csv")
+  #$DebugBackupList | Export-Csv -NoTypeInformation ($Output_directory + "/DebugBackupList" +$mdate + ".csv")
+  $DebugBackupInfo = @()
+  ForEach($backup in $DebugBackupList){
+    $DebugSummaryInfo = New-Object PSobject
+    $DebugSummaryInfo | Add-Member -NotePropertyName "BackupId" -NotePropertyValue $backup.id
+    $DebugSummaryInfo | Add-Member -NotePropertyName "date" -NotePropertyValue $backup.date
+    $DebugSummaryInfo | Add-Member -NotePropertyName "isOnDemandSnapshot" -NotePropertyValue $backup.isOnDemandSnapshot
+    $DebugSummaryInfo | Add-Member -NotePropertyName "clusterName" -NotePropertyValue ($backup.cluster).name
+    $DebugSummaryInfo | Add-Member -NotePropertyName "clusterId" -NotePropertyValue ($backup.cluster).Id
+    $DebugSummaryInfo | Add-Member -NotePropertyName "slaName" -NotePropertyValue ($backup.sladomain).name
+    $DebugSummaryInfo | Add-Member -NotePropertyName "slaId" -NotePropertyValue ($backup.sladomain).Id
+    $DebugBackupInfo += $DebugSummaryInfo
+  }
+  $DebugBackupInfo | Export-Csv -NoTypeInformation ($Output_directory + "/DebugBackupList" +$mdate + ".csv")
+
+}
 
 $R2Count = $R2 | Measure-Object | Select-Object -ExpandProperty Count
 $ClusterInfo = Get-ClusterInfo
@@ -1010,7 +1036,6 @@ ForEach($object in $R2){
         $BackupList = New-Object PSobject
         $BackupList | Add-Member -NotePropertyName "ObjectName"  -NotePropertyValue $object.name
         $BackupList | Add-Member -NotePropertyName "Location" -NotePropertyValue $object.location
-        #$BackupList | Add-Member -NotePropertyName "objectType"  -NotePropertyValue $object.objectType
         $MissedBackupIndex = 0
         $threestrikeHit = 0
         foreach($date in $dateReportTemplate){
