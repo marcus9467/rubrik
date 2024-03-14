@@ -1667,20 +1667,25 @@ if($OnboardMSSQL){
     #Map back to existing Availability Groups within RSC based on hosts included in the CSV
     ## Need to check for Failover clusters if needed.
     ForEach($objectName in $hostlist){
+      $mssqlObject = New-Object PSobject
         $AGMatch = @()
         ForEach($AG in $AGInfo){
             if((($AG.instances).logicalPath).name -contains $objectName.fqdn){
-                $AGMatch += $AG
+              $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $AG.id
+              $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                $AGMatch += $mssqlObject
             }
         }
         $AssignmentObjects += $AGMatch
         ForEach($SQLHost in $sqlHostInfo){
             if(($SQLHost).name -eq $objectName.fqdn){
-                $AssignmentObjects += $SQLHost
+              $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id
+              $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                $AssignmentObjects += $mssqlObject
             }
         }
     }   
-    $SLAList = Get-SLADomains
+    #$SLAList = Get-SLADomains
     <#
     ###############################################################################################################################################################
       Need to work out how to map the specific SLAs to a specified tier. At the moment we are just generating a list of all SLAs and then iterating through the 
@@ -1694,8 +1699,8 @@ if($OnboardMSSQL){
     ##Right now this maps each host to a random SLA. DO NOT USE YET
     foreach($Object in $AssignmentObjects){
         Write-Output "Assigning SLA " + $($SLAList[$SLACount]) + " to Object $object.name"
-        $objectId = $object.id | ConvertTo-Json
-        Set-mssqlSlas -ObjectIds $objectId -slaId $SLAList[$SLACount]
+        #$objectId = $object.id | ConvertTo-Json
+        Set-mssqlSlas -ObjectIds $object.id -slaId $object.slaId
 
         $SLACount+=1
         if($SLACount -eq $SLAList.count){
