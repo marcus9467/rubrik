@@ -2096,7 +2096,7 @@ if($OnboardMSSQL){
     # Get a List of Current MSSQL Hosts and DBs that are unprotected 
     $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
     $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
-    $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId -UnProtectedObjects
     $AssignmentObjects = @()
     ForEach($objectName in $hostlist){    
         ForEach($AG in $AGInfo){
