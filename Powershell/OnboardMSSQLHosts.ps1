@@ -9,15 +9,20 @@ This script will onboard new MSSQL hosts based on a provided CSV file and then l
 This will onboard new Windows hosts that were noted in the supplied CSV file to cluster f60da42b-f191-4ed4-8278-164f148b839c
 
 .EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV -GatherMSSQLHosts
+
+Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding process.
+
+.EXAMPLE
 ./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -OnboardMSSQL
 
 This will onboard new MSSQL databases by applying protection at either the AG or Host level. Need to update the SLA logic based on tier. For the input CSV the expectation is to have the following headers:
 
-fqdn,u_tier_rating,ClusterName,RubrikLocation
+serverName,SlaId
 
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
-    Created : March 04, 2024
+    Created : March 15, 2024
     Company : Rubrik Inc
 
 #>
@@ -35,7 +40,9 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$OnboardHosts,
     [parameter(Mandatory=$false)]
-    [switch]$OnboardMSSQL
+    [switch]$OnboardMSSQL,
+    [parameter(Mandatory=$false)]
+    [switch]$GatherMSSQLHosts
 )
 
 function connect-rsc {
@@ -720,6 +727,8 @@ function Set-mssqlSlas{
     }
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+    (($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync
+
 
 }  
 function Get-mssqlAGs{
@@ -993,6 +1002,415 @@ function Get-mssqlAGs{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
+    
+        while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
+            $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
+            Write-Host ("Looking at End Cursor " + $endCursor)
+            $variables = "{
+                `"first`": 200,
+                `"filter`": [
+                  {
+                    `"field`": `"IS_RELIC`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_REPLICATED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"sortBy`": `"NAME`",
+                `"sortOrder`": `"ASC`",
+                `"databaseDescendantFilter`": [
+                  {
+                    `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_MOUNT`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"after`": `"${endCursor}`"
+              }"
+            if($UnProtectedObjects){
+                $variables = "{
+                    `"first`": 200,
+                    `"filter`": [
+                        {
+                            `"field`": `"EFFECTIVE_SLA_WITH_RETENTION_SLA`",
+                            `"texts`": [
+                              `"Unprotected`"
+                            ]
+                          },
+                      {
+                        `"field`": `"IS_RELIC`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_REPLICATED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_ARCHIVED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      }
+                    ],
+                    `"sortBy`": `"NAME`",
+                    `"sortOrder`": `"ASC`",
+                    `"databaseDescendantFilter`": [
+                      {
+                        `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_MOUNT`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      },
+                      {
+                        `"field`": `"IS_ARCHIVED`",
+                        `"texts`": [
+                          `"false`"
+                        ]
+                      }
+                    ],
+                    `"after`": `"${endCursor}`"
+                  }"
+            }
+            $JSON_BODY = @{
+                "variables" = $variables
+                "query" = $query
+            }
+            $JSON_BODY = $JSON_BODY | ConvertTo-Json
+            $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+            $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
+    
+        }
+    }
+    catch{
+        Write-Error("Error $($_)")
+      }
+      finally{
+        Write-Output $snappableInfo
+      }
+    
+}
+function Get-mssqlFCs{
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$clusterId,
+        [parameter(Mandatory=$false)]
+        [switch]$UnProtectedObjects
+    )
+    try{
+        $variables = "{
+            `"isMultitenancyEnabled`": true,
+            `"first`": 200,
+            `"filter`": [
+              {
+                `"field`": `"IS_RELIC`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_REPLICATED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ],
+            `"sortBy`": `"NAME`",
+            `"sortOrder`": `"ASC`",
+            `"instanceDescendantFilter`": [
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ],
+            `"databaseDescendantFilter`": [
+              {
+                `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_MOUNT`",
+                `"texts`": [
+                  `"false`"
+                ]
+              },
+              {
+                `"field`": `"IS_ARCHIVED`",
+                `"texts`": [
+                  `"false`"
+                ]
+              }
+            ]
+          }"
+        if($UnProtectedObjects){
+            $variables = "{
+                `"first`": 200,
+                `"filter`": [
+                    {
+                        `"field`": `"EFFECTIVE_SLA_WITH_RETENTION_SLA`",
+                        `"texts`": [
+                          `"Unprotected`"
+                        ]
+                      },
+                  {
+                    `"field`": `"IS_RELIC`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_REPLICATED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ],
+                `"sortBy`": `"NAME`",
+                `"sortOrder`": `"ASC`",
+                `"databaseDescendantFilter`": [
+                  {
+                    `"field`": `"IS_LOG_SHIPPING_SECONDARY`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_MOUNT`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_ARCHIVED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ]
+              }"
+        }
+        $query = "query MssqlFailoverClusterHierarchyClusterListQuery(`$first: Int!, `$after: String, `$filter: [Filter!], `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isMultitenancyEnabled: Boolean = false, `$instanceDescendantFilter: [Filter!], `$databaseDescendantFilter: [Filter!]) {
+            mssqlTopLevelDescendants(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, typeFilter: [WindowsCluster]) {
+              edges {
+                cursor
+                node {
+                  id
+                  authorizedOperations
+                  ...ClusterChildInstancesEffectiveSlaColumnFragment
+                  ... on WindowsCluster {
+                    hosts {
+                      id
+                      ...CbtStatusColumnFragment
+                      __typename
+                    }
+                    instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
+                      count
+                      __typename
+                    }
+                    databaseDescendantConnection: descendantConnection(filter: `$databaseDescendantFilter, typeFilter: [Mssql]) {
+                      count
+                      __typename
+                    }
+                    __typename
+                  }
+                  ...MssqlNameColumnFragment
+                  ...CdmClusterColumnFragment
+                  ...CdmClusterLabelFragment
+                  ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
+                  ...EffectiveSlaColumnFragment
+                  __typename
+                }
+                __typename
+              }
+              pageInfo {
+                startCursor
+                endCursor
+                hasNextPage
+                hasPreviousPage
+                __typename
+              }
+              __typename
+            }
+          }
+          
+          fragment CbtStatusColumnFragment on PhysicalHost {
+            cbtStatus
+            defaultCbt
+            __typename
+          }
+          
+          fragment OrganizationsColumnFragment on HierarchyObject {
+            allOrgs {
+              name
+              __typename
+            }
+            __typename
+          }
+          
+          fragment MssqlNameColumnFragment on HierarchyObject {
+            id
+            name
+            objectType
+            __typename
+          }
+          
+          fragment CdmClusterColumnFragment on CdmHierarchyObject {
+            replicatedObjectCount
+            cluster {
+              id
+              name
+              version
+              status
+              __typename
+            }
+            __typename
+          }
+          
+          fragment CdmClusterLabelFragment on CdmHierarchyObject {
+            cluster {
+              id
+              name
+              version
+              __typename
+            }
+            primaryClusterLocation {
+              id
+              __typename
+            }
+            __typename
+          }
+          
+          fragment EffectiveSlaColumnFragment on HierarchyObject {
+            id
+            effectiveSlaDomain {
+              ...EffectiveSlaDomainFragment
+              ... on GlobalSlaReply {
+                description
+                __typename
+              }
+              __typename
+            }
+            ... on CdmHierarchyObject {
+              pendingSla {
+                ...SLADomainFragment
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          
+          fragment EffectiveSlaDomainFragment on SlaDomain {
+            id
+            name
+            ... on GlobalSlaReply {
+              isRetentionLockedSla
+              retentionLockMode
+              __typename
+            }
+            ... on ClusterSlaDomain {
+              fid
+              cluster {
+                id
+                name
+                __typename
+              }
+              isRetentionLockedSla
+              retentionLockMode
+              __typename
+            }
+            __typename
+          }
+          
+          fragment SLADomainFragment on SlaDomain {
+            id
+            name
+            ... on ClusterSlaDomain {
+              fid
+              cluster {
+                id
+                name
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          
+          fragment ClusterChildInstancesEffectiveSlaColumnFragment on WindowsCluster {
+            id
+            instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
+              edges {
+                node {
+                  id
+                  ...EffectiveSlaColumnFragment
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }"
+        $JSON_BODY = @{
+            "variables" = $variables
+            "query" = $query
+        }
+        $snappableInfo = @()
+        $JSON_BODY = $JSON_BODY | ConvertTo-Json
+        $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $snappableInfo += (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
     
         while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
             $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
@@ -1651,6 +2069,22 @@ if($OnboardHosts){
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
 }
+if($GatherMSSQLHosts){
+    $Output_directory = (Get-Location).path
+    $mdate = (Get-Date).tostring("yyyyMMddHHmm")
+    $mssqlHostList = Get-MssqlHosts
+    $HostInfoStuff = @()
+    forEach($hostitem in $mssqlHostList){
+	    $hostInfo = New-object psobject
+	    $hostInfo | Add-Member -NotePropertyName "ServerName" -NotePropertyValue $hostitem.name
+	    $hostInfo | Add-Member -NotePropertyName "hostId" -NotePropertyValue $hostitem.id
+	    $hostInfo | Add-Member -NotePropertyName "slaId" -NotePropertyValue $hostitem.effectiveSlaDomain.id
+	    $HostInfoStuff += $hostinfo
+    }
+    Write-Host ("Writing CSV file to "  + $Output_directory + "/UnprotectedMssqlHosts" + $mdate + ".csv")
+    $HostInfoStuff | Export-Csv -NoTypeInformation ($Output_directory + "/UnprotectedMssqlHosts" +$mdate + ".csv")
+    disconnect-rsc
+}
 if($OnboardMSSQL){
     $hostlist = Import-Csv $CSV
     $hostlistCount = ($hostlist | Measure-Object).Count
@@ -1662,50 +2096,51 @@ if($OnboardMSSQL){
     # Get a List of Current MSSQL Hosts and DBs that are unprotected 
     $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
     $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
     $AssignmentObjects = @()
-
-    #Map back to existing Availability Groups within RSC based on hosts included in the CSV
-    ## Need to check for Failover clusters if needed.
-    ForEach($objectName in $hostlist){
-      $mssqlObject = New-Object PSobject
-        $AGMatch = @()
+    ForEach($objectName in $hostlist){    
         ForEach($AG in $AGInfo){
-            if((($AG.instances).logicalPath).name -contains $objectName.fqdn){
-              $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $AG.id
-              $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                $AGMatch += $mssqlObject
-            }
-        }
-        $AssignmentObjects += $AGMatch
-        ForEach($SQLHost in $sqlHostInfo){
-            if(($SQLHost).name -eq $objectName.fqdn){
-              $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id
-              $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+            if((($AG.instances).logicalPath).name -match $objectName.Servername){
+                $mssqlObject = New-Object PSobject
+                $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
+                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($AG.id | ConvertTo-Json)
+                $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
                 $AssignmentObjects += $mssqlObject
             }
         }
-    }   
-    #$SLAList = Get-SLADomains
-    <#
-    ###############################################################################################################################################################
-      Need to work out how to map the specific SLAs to a specified tier. At the moment we are just generating a list of all SLAs and then iterating through the 
-      list of objects pairing them with a random SLA. This will be modified to pair specific tiers to specific SLAs
-    ###############################################################################################################################################################
-    #>
-
-
-    $SLACount = 0
-
-    ##Right now this maps each host to a random SLA. DO NOT USE YET
-    foreach($Object in $AssignmentObjects){
-        Write-Output "Assigning SLA " + $($SLAList[$SLACount]) + " to Object $object.name"
-        #$objectId = $object.id | ConvertTo-Json
-        Set-mssqlSlas -ObjectIds $object.id -slaId $object.slaId
-
-        $SLACount+=1
-        if($SLACount -eq $SLAList.count){
-            $SLACount=0
+        ForEach($SQLHost in $sqlHostInfo){
+            if(($SQLHost).name -match $objectName.servername){
+                $mssqlObject = New-Object PSobject
+                $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
+                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($SQLHost.id | ConvertTo-Json)
+                $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
+                $AssignmentObjects += $mssqlObject
+                if($fcinfo.hosts.id -contains $SQLHost.id){
+                    foreach($FC in $FCinfo){
+                        if($FC.hosts.id -match $SQLHost.id){
+                            $FCObject = New-Object PSobject
+                            $FCObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
+                            $FCObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($SQLHost.id | ConvertTo-Json)
+                            $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                            $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+                            $AssignmentObjects += $FCObject
+                        }
+                    }
+                    
+                }
+                
+            }
         }
+    }   
+    $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
+    $AssignmentObjectsIndex = 1
+    foreach($Object in $AssignmentObjects){
+        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name)
+        Set-mssqlSlas -ObjectIds $object.id -slaId $object.slaId
+        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
+        $AssignmentObjectsIndex++
     }
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
