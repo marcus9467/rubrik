@@ -2072,7 +2072,7 @@ if($OnboardHosts){
 if($GatherMSSQLHosts){
     $Output_directory = (Get-Location).path
     $mdate = (Get-Date).tostring("yyyyMMddHHmm")
-    $mssqlHostList = Get-MssqlHosts
+    $mssqlHostList = Get-MssqlHosts -UnProtectedObjects
     $HostInfoStuff = @()
     forEach($hostitem in $mssqlHostList){
 	    $hostInfo = New-object psobject
