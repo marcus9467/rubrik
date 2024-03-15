@@ -2072,17 +2072,36 @@ if($OnboardHosts){
 if($GatherMSSQLHosts){
     $Output_directory = (Get-Location).path
     $mdate = (Get-Date).tostring("yyyyMMddHHmm")
-    $mssqlHostList = Get-MssqlHosts -UnProtectedObjects
-    $HostInfoStuff = @()
-    forEach($hostitem in $mssqlHostList){
+    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
+    $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId -UnProtectedObjects
+    $UnprotectedSql = @()
+    forEach($hostitem in $sqlHostInfo){
 	    $hostInfo = New-object psobject
 	    $hostInfo | Add-Member -NotePropertyName "ServerName" -NotePropertyValue $hostitem.name
 	    $hostInfo | Add-Member -NotePropertyName "hostId" -NotePropertyValue $hostitem.id
 	    $hostInfo | Add-Member -NotePropertyName "slaId" -NotePropertyValue $hostitem.effectiveSlaDomain.id
-	    $HostInfoStuff += $hostinfo
+        $hostInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "StandAlone"
+	    $UnprotectedSql += $hostinfo
+    }
+    forEach($hostitem in $AGInfo){
+	    $hostInfo = New-object psobject
+	    $hostInfo | Add-Member -NotePropertyName "ServerName" -NotePropertyValue $hostitem.name
+	    $hostInfo | Add-Member -NotePropertyName "hostId" -NotePropertyValue $hostitem.id
+	    $hostInfo | Add-Member -NotePropertyName "slaId" -NotePropertyValue $hostitem.effectiveSlaDomain.id
+        $hostInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
+	    $UnprotectedSql += $hostinfo
+    }
+    forEach($hostitem in $FCinfo){
+	    $hostInfo = New-object psobject
+	    $hostInfo | Add-Member -NotePropertyName "ServerName" -NotePropertyValue $hostitem.name
+	    $hostInfo | Add-Member -NotePropertyName "hostId" -NotePropertyValue $hostitem.id
+	    $hostInfo | Add-Member -NotePropertyName "slaId" -NotePropertyValue $hostitem.effectiveSlaDomain.id
+        $hostInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+	    $UnprotectedSql += $hostinfo
     }
     Write-Host ("Writing CSV file to "  + $Output_directory + "/UnprotectedMssqlHosts" + $mdate + ".csv")
-    $HostInfoStuff | Export-Csv -NoTypeInformation ($Output_directory + "/UnprotectedMssqlHosts" +$mdate + ".csv")
+    $UnprotectedSql | Export-Csv -NoTypeInformation ($Output_directory + "/UnprotectedMssqlHosts" +$mdate + ".csv")
     disconnect-rsc
 }
 if($OnboardMSSQL){
