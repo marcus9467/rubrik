@@ -694,14 +694,16 @@ function Set-mssqlSlasBatch{
         [parameter(Mandatory=$true)]
         [string]$slaId,
         [parameter(Mandatory = $true)]
-        [object[]]$ObjectIds
+        [string]$ObjectIds
     )
 
     try{    
         $variables = "{
         `"input`": {
           `"updateInfo`": {
-            `"ids`": ${objectIds},
+            `"ids`": [
+                ${objectIds}
+            ],
             `"existingSnapshotRetention`": `"EXISTING_SNAPSHOT_RETENTION_RETAIN_SNAPSHOTS`",
             `"mssqlSlaPatchProperties`": {
               `"configuredSlaDomainId`": `"$slaId`",
@@ -2164,6 +2166,16 @@ if($OnboardMSSQL){
     }   
     $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
     $AssignmentObjectsIndex = 1
+    foreach($Object in $AssignmentObjects){
+        $objectId = $object.id | ConvertTo-Json
+        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
+        
+        Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
+        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
+        $AssignmentObjectsIndex++
+    }
+
+<#
     # Assuming $AssignmentObjects is already populated
     # Group by SLAId
     $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
@@ -2178,6 +2190,7 @@ if($OnboardMSSQL){
         foreach ($id in $allIds) {
          $batches.Add($id)
             if ($batches.Count -eq 50) {
+                #Wait-Debugger
                 Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
                 Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
                 $batches.Clear()
@@ -2192,18 +2205,10 @@ if($OnboardMSSQL){
         }
     }
 
-
-<#
-    foreach($Object in $AssignmentObjects){
-        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name)
-        $objectId = $object.id | ConvertTo-Json
-        Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
-        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
-        $AssignmentObjectsIndex++
-    }
-
-
 #>
+
+
+
 
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
