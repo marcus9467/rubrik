@@ -688,7 +688,7 @@ function Register-Host{
             Write-Output $jobErrors
           } 
   }
-function Set-mssqlSlas{
+function Set-mssqlSlasBatch{
     [CmdletBinding()]
     param (
         [parameter(Mandatory=$true)]
@@ -2169,19 +2169,22 @@ if($OnboardMSSQL){
         foreach ($id in $allIds) {
          $batches.Add($id)
             if ($batches.Count -eq 50) {
-                Set-mssqlSlasBatch -slaId $slaId -ObjectIds $batches.ToArray()
+                Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
+                Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
                 $batches.Clear()
             }
         }
 
         # Process remaining items if any
         if ($batches.Count -gt 0) {
-            Set-mssqlSlasBatch -slaId $slaId -ObjectIds $batches.ToArray()
+            #Wait-Debugger
+            Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
+            Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
         }
     }
 
 
-
+<#
     foreach($Object in $AssignmentObjects){
         Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name)
         $objectId = $object.id | ConvertTo-Json
@@ -2189,6 +2192,10 @@ if($OnboardMSSQL){
         Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
         $AssignmentObjectsIndex++
     }
+
+
+#>
+
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
 }
