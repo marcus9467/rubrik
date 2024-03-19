@@ -697,7 +697,8 @@ function Set-mssqlSlasBatch{
         [object[]]$ObjectIds
     )
 
-    $variables = "{
+    try{    
+        $variables = "{
         `"input`": {
           `"updateInfo`": {
             `"ids`": ${objectIds},
@@ -726,11 +727,19 @@ function Set-mssqlSlasBatch{
         "query" = $query
     }
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
+
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
     (($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync
+    }
+    catch{
+        Write-Error("Error $($_)")
+      }
+      finally{
+        Write-Output (($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync
+    }
+}
 
-
-}  
+  
 function Get-mssqlAGs{
     [CmdletBinding()]
     param (
