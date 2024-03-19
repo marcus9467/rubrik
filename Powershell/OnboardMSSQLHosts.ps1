@@ -42,7 +42,9 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$OnboardMSSQL,
     [parameter(Mandatory=$false)]
-    [switch]$GatherMSSQLHosts
+    [switch]$GatherMSSQLHosts,
+    [parameter(Mandatory=$false)]
+    [switch]$batched
 )
 
 function connect-rsc {
@@ -701,15 +703,17 @@ function Set-mssqlSlasBatch{
         $variables = "{
         `"input`": {
           `"updateInfo`": {
-            `"ids`": [
-                ${objectIds}
-            ],
-            `"existingSnapshotRetention`": `"EXISTING_SNAPSHOT_RETENTION_RETAIN_SNAPSHOTS`",
+            `"ids`": ${objectIds},
+            `"shouldApplyToExistingSnapshots`": false,
+            `"shouldApplyToNonPolicySnapshots`": false,
             `"mssqlSlaPatchProperties`": {
               `"configuredSlaDomainId`": `"$slaId`",
               `"mssqlSlaRelatedProperties`": {
-                `"copyOnly`": false
-              }
+                `"copyOnly`": false,
+                `"hasLogConfigFromSla`": true,
+                `"hostLogRetention`": -1
+              },
+              `"useConfiguredDefaultLogRetention`": false
             }
           },
           `"userNote`": `"`"
@@ -2124,9 +2128,9 @@ if($OnboardMSSQL){
     $IndexCount = 1
     $MissingHostList = @()
     # Get a List of Current MSSQL Hosts and DBs that are unprotected 
-    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
-    $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
-    $FCinfo = Get-mssqlFCs -clusterId $clusterId -UnProtectedObjects
+    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId #-UnProtectedObjects
+    $AGInfo = Get-mssqlAGs -clusterId $clusterId #-UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
     $AssignmentObjects = @()
     ForEach($objectName in $hostlist){    
         ForEach($AG in $AGInfo){
@@ -2164,52 +2168,50 @@ if($OnboardMSSQL){
             }
         }
     }   
-    $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
-    $AssignmentObjectsIndex = 1
-    foreach($Object in $AssignmentObjects){
-        $objectId = $object.id | ConvertTo-Json
-        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
-        
-        Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
-        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
-        $AssignmentObjectsIndex++
-    }
+    if($batched){
+        # Assuming $AssignmentObjects is already populated
+        # Group by SLAId
+        $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
+        Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
+        foreach ($group in $groupedObjects) {
+            $slaId = $group.Name
+            $allIds = $group.Group.Id
 
-<#
-    # Assuming $AssignmentObjects is already populated
-    # Group by SLAId
-    $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
-    Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
-    foreach ($group in $groupedObjects) {
-        $slaId = $group.Name
-        $allIds = $group.Group.Id
+            # Split into batches of 50
+            $batches = [System.Collections.Generic.List[object]]::new()
 
-        # Split into batches of 50
-        $batches = [System.Collections.Generic.List[object]]::new()
+            foreach ($id in $allIds) {
+             $batches.Add($id)
+                if ($batches.Count -eq 50) {
+                    #Wait-Debugger
+                    Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
+                    Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
+                    $batches.Clear()
+                }
+            }
 
-        foreach ($id in $allIds) {
-         $batches.Add($id)
-            if ($batches.Count -eq 50) {
+            # Process remaining items if any
+            if ($batches.Count -gt 0) {
                 #Wait-Debugger
                 Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
                 Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
-                $batches.Clear()
             }
         }
-
-        # Process remaining items if any
-        if ($batches.Count -gt 0) {
-            #Wait-Debugger
-            Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
-            Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
-        }
+        Write-Host "Disconnecting From Rubrik Security Cloud."
+        disconnect-rsc
     }
-
-#>
-
-
-
-
-    Write-Host "Disconnecting From Rubrik Security Cloud."
-    disconnect-rsc
+    else{
+        $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
+        $AssignmentObjectsIndex = 1
+        foreach($Object in $AssignmentObjects){
+            $objectId = $object.id | ConvertTo-Json
+            Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
+            
+            Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
+            Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
+            $AssignmentObjectsIndex++
+        }
+        Write-Host "Disconnecting From Rubrik Security Cloud."
+        disconnect-rsc
+    }
 }
