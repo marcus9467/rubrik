@@ -693,8 +693,8 @@ function Set-mssqlSlas{
     param (
         [parameter(Mandatory=$true)]
         [string]$slaId,
-        [parameter(Mandatory=$true)]
-        [string]$ObjectIds
+        [parameter(Mandatory = $true)]
+        [object[]]$ObjectIds
     )
 
     $variables = "{
@@ -2122,7 +2122,7 @@ if($OnboardMSSQL){
             if((($AG.instances).logicalPath).name -match $objectName.Servername){
                 $mssqlObject = New-Object PSobject
                 $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($AG.id | ConvertTo-Json)
+                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                 $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
                 $AssignmentObjects += $mssqlObject
@@ -2132,7 +2132,7 @@ if($OnboardMSSQL){
             if(($SQLHost).name -match $objectName.servername){
                 $mssqlObject = New-Object PSobject
                 $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($SQLHost.id | ConvertTo-Json)
+                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                 $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
                 $AssignmentObjects += $mssqlObject
@@ -2141,7 +2141,7 @@ if($OnboardMSSQL){
                         if($FC.hosts.id -match $SQLHost.id){
                             $FCObject = New-Object PSobject
                             $FCObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                            $FCObject | Add-Member -NotePropertyName "Id" -NotePropertyValue ($SQLHost.id | ConvertTo-Json)
+                            $FCObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id 
                             $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                             $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
                             $AssignmentObjects += $FCObject
@@ -2155,9 +2155,37 @@ if($OnboardMSSQL){
     }   
     $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
     $AssignmentObjectsIndex = 1
+    # Assuming $AssignmentObjects is already populated
+    # Group by SLAId
+    $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
+    Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
+    foreach ($group in $groupedObjects) {
+        $slaId = $group.Name
+        $allIds = $group.Group.Id
+
+        # Split into batches of 50
+        $batches = [System.Collections.Generic.List[object]]::new()
+
+        foreach ($id in $allIds) {
+         $batches.Add($id)
+            if ($batches.Count -eq 50) {
+                Set-mssqlSlasBatch -slaId $slaId -ObjectIds $batches.ToArray()
+                $batches.Clear()
+            }
+        }
+
+        # Process remaining items if any
+        if ($batches.Count -gt 0) {
+            Set-mssqlSlasBatch -slaId $slaId -ObjectIds $batches.ToArray()
+        }
+    }
+
+
+
     foreach($Object in $AssignmentObjects){
         Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name)
-        Set-mssqlSlas -ObjectIds $object.id -slaId $object.slaId
+        $objectId = $object.id | ConvertTo-Json
+        Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
         Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
         $AssignmentObjectsIndex++
     }
