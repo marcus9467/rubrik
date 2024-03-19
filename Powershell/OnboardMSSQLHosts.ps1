@@ -2050,7 +2050,7 @@ $logoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "sess
 
 if($OnboardHosts){
     $hostlist = Import-Csv $CSV
-    $hostlist = $hostlist.Name
+    $hostlist = $hostlist.serverName
     $hostlistCount = ($hostlist | Measure-Object).Count
     $Output_directory = (Get-Location).path
     $mdate = (Get-Date).tostring("yyyyMMddHHmm")
