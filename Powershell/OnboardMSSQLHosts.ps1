@@ -2128,9 +2128,9 @@ if($OnboardMSSQL){
     $IndexCount = 1
     $MissingHostList = @()
     # Get a List of Current MSSQL Hosts and DBs that are unprotected 
-    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId #-UnProtectedObjects
-    $AGInfo = Get-mssqlAGs -clusterId $clusterId #-UnProtectedObjects
-    $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
+    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
+    $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId -UnProtectedObjects
     $AssignmentObjects = @()
     ForEach($objectName in $hostlist){    
         ForEach($AG in $AGInfo){
@@ -2207,7 +2207,7 @@ if($OnboardMSSQL){
             $objectId = $object.id | ConvertTo-Json
             Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
             
-            Set-mssqlSlas -ObjectIds $objectId -slaId $object.slaId
+            Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
             Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
             $AssignmentObjectsIndex++
         }
