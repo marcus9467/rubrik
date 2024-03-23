@@ -14,9 +14,16 @@ This will onboard new Windows hosts that were noted in the supplied CSV file to 
 Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding process.
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -OnboardMSSQL
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -clusterId $clusterId -OnboardMSSQL
 
-This will onboard new MSSQL databases by applying protection at either the AG or Host level. Need to update the SLA logic based on tier. For the input CSV the expectation is to have the following headers:
+This will onboard new MSSQL databases by applying protection at the instance level. For the input CSV the expectation is to have the following headers:
+
+serverName,SlaId
+
+.EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -clusterId $clusterId -OnboardMSSQL -batched
+
+This will onboard new MSSQL databases by applying protection at the instance level. Identical to the prior example, but this operates in batches of 50, making it more useful for scaling up onboarding. For the input CSV the expectation is to have the following headers:
 
 serverName,SlaId
 
