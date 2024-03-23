@@ -735,17 +735,16 @@ function Set-mssqlSlasBatch{
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
 
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-    (($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync
+    ((($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync).items
     }
     catch{
         Write-Error("Error $($_)")
       }
       finally{
-        Write-Output (($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync
+        Write-Output ((($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync).items
     }
 }
 
-  
 function Get-mssqlAGs{
     [CmdletBinding()]
     param (
@@ -2128,46 +2127,59 @@ if($OnboardMSSQL){
     $IndexCount = 1
     $MissingHostList = @()
     # Get a List of Current MSSQL Hosts and DBs that are unprotected 
-    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId -UnProtectedObjects
-    $AGInfo = Get-mssqlAGs -clusterId $clusterId -UnProtectedObjects
-    $FCinfo = Get-mssqlFCs -clusterId $clusterId -UnProtectedObjects
+    $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId #-UnProtectedObjects
+    $AGInfo = Get-mssqlAGs -clusterId $clusterId #-UnProtectedObjects
+    $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
     $AssignmentObjects = @()
-    ForEach($objectName in $hostlist){    
+    ForEach($objectName in $hostlist){ 
+        #Availability Groups   
         ForEach($AG in $AGInfo){
             if((($AG.instances).logicalPath).name -match $objectName.Servername){
                 $mssqlObject = New-Object PSobject
-                $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $AG.id
+                $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
+                $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AF.Name
+                $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                 $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
                 $AssignmentObjects += $mssqlObject
             }
         }
         ForEach($SQLHost in $sqlHostInfo){
+            #StandAlone Hosts
             if(($SQLHost).name -match $objectName.servername){
-                $mssqlObject = New-Object PSobject
-                $mssqlObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                $mssqlObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id
-                $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
-                $AssignmentObjects += $mssqlObject
+                $instanceList = $sqlHost.instanceDescendantConnection.edges.node
+                foreach($instance in $instanceList){
+                        $mssqlObject = New-Object PSobject
+                        $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
+                        $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue "notApplicable"
+                        $mssqlObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
+                        $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id
+                        $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                        $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
+                        $AssignmentObjects += $mssqlObject
+                }
+                #Failover Clusters
                 if($fcinfo.hosts.id -contains $SQLHost.id){
                     foreach($FC in $FCinfo){
                         if($FC.hosts.id -match $SQLHost.id){
-                            $FCObject = New-Object PSobject
-                            $FCObject | Add-Member -NotePropertyName "Name" -NotePropertyValue $objectName.ServerName
-                            $FCObject | Add-Member -NotePropertyName "Id" -NotePropertyValue $SQLHost.id 
-                            $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                            $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
-                            $AssignmentObjects += $FCObject
+                            $instanceList = $FC.instanceDescendantConnection.edges.node
+                            foreach($instance in $instanceList){
+                                $FCObject = New-Object PSobject
+                                $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
+                                $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
+                                $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
+                                $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
+                                $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                                $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+                                $AssignmentObjects += $FCObject
+                            }
                         }
-                    }
-                    
+                    }   
                 }
-                
             }
         }
-    }   
+    }
+    $AssignmentObjects = $AssignmentObjects | Sort-Object -Unique {$_.instanceId}
     if($batched){
         # Assuming $AssignmentObjects is already populated
         # Group by SLAId
@@ -2175,28 +2187,30 @@ if($OnboardMSSQL){
         Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
         foreach ($group in $groupedObjects) {
             $slaId = $group.Name
-            $allIds = $group.Group.Id
+            $allIds = $group.Group.instanceId
 
             # Split into batches of 50
             $batches = [System.Collections.Generic.List[object]]::new()
-
             foreach ($id in $allIds) {
              $batches.Add($id)
                 if ($batches.Count -eq 50) {
-                    #Wait-Debugger
                     Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
+                    Write-Host "======================================================================================================================================================================================================"
+                    Write-Host "API Output:"
                     Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
                     $batches.Clear()
                 }
             }
-
             # Process remaining items if any
             if ($batches.Count -gt 0) {
-                #Wait-Debugger
                 Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
+                Write-Host "======================================================================================================================================================================================================"
+                Write-Host "API Output:"
                 Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
             }
         }
+        Write-Host ("Writing CSV file to "  + $Output_directory + "/mssqlAssignmentList-" + $mdate + ".csv")
+        $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/mssqlAssignmentList-" +$mdate + ".csv")
         Write-Host "Disconnecting From Rubrik Security Cloud."
         disconnect-rsc
     }
@@ -2204,13 +2218,18 @@ if($OnboardMSSQL){
         $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
         $AssignmentObjectsIndex = 1
         foreach($Object in $AssignmentObjects){
-            $objectId = $object.id | ConvertTo-Json
+            $objectId = $object.instanceId | ConvertTo-Json
+            Write-Host "======================================================================================================================================================================================================"
             Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
-            
+            Write-Host "======================================================================================================================================================================================================"
+            Write-Host "API Output:"
             Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
             Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
             $AssignmentObjectsIndex++
         }
+        Write-Host "======================================================================================================================================================================================================"
+        Write-Host ("Writing CSV file to "  + $Output_directory + "/mssqlAssignmentList-" + $mdate + ".csv")
+        $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/mssqlAssignmentList-" +$mdate + ".csv")
         Write-Host "Disconnecting From Rubrik Security Cloud."
         disconnect-rsc
     }
