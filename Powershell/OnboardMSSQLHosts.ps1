@@ -14,16 +14,9 @@ This will onboard new Windows hosts that were noted in the supplied CSV file to 
 Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding process.
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -clusterId $clusterId -OnboardMSSQL
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -OnboardMSSQL
 
-This will onboard new MSSQL databases by applying protection at the instance level. For the input CSV the expectation is to have the following headers:
-
-serverName,SlaId
-
-.EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -clusterId $clusterId -OnboardMSSQL -batched
-
-This will onboard new MSSQL databases by applying protection at the instance level. Identical to the prior example, but this operates in batches of 50, making it more useful for scaling up onboarding. For the input CSV the expectation is to have the following headers:
+This will onboard new MSSQL databases by applying protection at either the AG or Host level. Need to update the SLA logic based on tier. For the input CSV the expectation is to have the following headers:
 
 serverName,SlaId
 
@@ -2042,6 +2035,333 @@ function Get-SLADomains{
       Write-Output $SlaInfo
   }
 }
+function Get-PhysicalHost{
+  [CmdletBinding()]
+  param (
+      [parameter(Mandatory=$true)]
+      [string]$clusterId,
+      [parameter(Mandatory=$false)]
+      [switch]$UnProtectedObjects
+  )
+  try{
+    $variables = "{
+      `"isMultitenancyEnabled`": true,
+      `"hostRoot`": `"WINDOWS_HOST_ROOT`",
+      `"first`": 200,
+      `"filter`": [
+        {
+          `"field`": `"CLUSTER_ID`",
+          `"texts`": [
+            `"39b92c18-d897-4b55-a7f9-17ff178616d0`"
+          ]
+        },
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_REPLICATED`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_KUPR_HOST`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ],
+      `"sortBy`": `"NAME`",
+      `"sortOrder`": `"ASC`",
+      `"childFilter`": [
+        {
+          `"field`": `"IS_GHOST`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ]
+    }"
+    $query = "query PhysicalHostListQuery(`$hostRoot: HostRoot!, `$first: Int!, `$after: String, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$filter: [Filter!]!, `$childFilter: [Filter!], `$isMultitenancyEnabled: Boolean = false) {
+      physicalHosts(hostRoot: `$hostRoot, filter: `$filter, first: `$first, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
+        edges {
+          cursor
+          node {
+            id
+            name
+            isArchived
+            descendantConnection(typeFilter: [LinuxFileset, WindowsFileset]) {
+              edges {
+                node {
+                  id
+                  name
+                  objectType
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+            authorizedOperations
+            cluster {
+              id
+              name
+              version
+              status
+              ...ClusterNodeConnectionFragment
+              __typename
+            }
+            ...OrganizationsColumnFragment @include(if: `$isMultitenancyEnabled)
+            primaryClusterLocation {
+              id
+              __typename
+            }
+            effectiveSlaDomain {
+              ...EffectiveSlaDomainFragment
+              __typename
+            }
+            osType
+            osName
+            connectionStatus {
+              connectivity
+              timestampMillis
+              __typename
+            }
+            isOracleHost
+            oracleUserDetails {
+              sysDbaUser
+              queryUser
+              __typename
+            }
+            ...PhysicalHostConnectionStatusColumnFragment
+            physicalChildConnection(typeFilter: [LinuxFileset, WindowsFileset], filter: `$childFilter) {
+              count
+              edges {
+                node {
+                  id
+                  name
+                  objectType
+                  slaPauseStatus
+                  effectiveSlaDomain {
+                    ...EffectiveSlaDomainFragment
+                    __typename
+                  }
+                  pendingSla {
+                    ...SLADomainFragment
+                    __typename
+                  }
+                  ...LinuxFilesetListFragment
+                  ...WindowsFilesetListFragment
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        pageInfo {
+          endCursor
+          startCursor
+          hasNextPage
+          hasPreviousPage
+          __typename
+        }
+        __typename
+      }
+    }
+    
+    fragment OrganizationsColumnFragment on HierarchyObject {
+      allOrgs {
+        name
+        __typename
+      }
+      __typename
+    }
+    
+    fragment EffectiveSlaDomainFragment on SlaDomain {
+      id
+      name
+      ... on GlobalSlaReply {
+        isRetentionLockedSla
+        retentionLockMode
+        __typename
+      }
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+          __typename
+        }
+        isRetentionLockedSla
+        retentionLockMode
+        __typename
+      }
+      __typename
+    }
+    
+    fragment SLADomainFragment on SlaDomain {
+      id
+      name
+      ... on ClusterSlaDomain {
+        fid
+        cluster {
+          id
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    
+    fragment ClusterNodeConnectionFragment on Cluster {
+      clusterNodeConnection {
+        nodes {
+          id
+          status
+          ipAddress
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    
+    fragment PhysicalHostConnectionStatusColumnFragment on PhysicalHost {
+      id
+      authorizedOperations
+      connectionStatus {
+        connectivity
+        __typename
+      }
+      __typename
+    }
+    
+    fragment LinuxFilesetListFragment on LinuxFileset {
+      isRelic
+      excludes: pathExcluded
+      includes: pathIncluded
+      exceptions: pathExceptions
+      isPassThrough
+      replicatedObjects {
+        cluster {
+          id
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    
+    fragment WindowsFilesetListFragment on WindowsFileset {
+      isRelic
+      excludes: pathExcluded
+      includes: pathIncluded
+      exceptions: pathExceptions
+      isPassThrough
+      replicatedObjects {
+        cluster {
+          id
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }"
+    $JSON_BODY = @{
+      "variables" = $variables
+      "query" = $query
+  }
+
+  $windowsHostInfo = @()
+  $JSON_BODY = $JSON_BODY | ConvertTo-Json
+  $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+  $windowsHostInfo += (((($result.content | convertFrom-Json).data).physicalHosts).edges).node
+
+  while ((((($result.content | convertFrom-Json).data).physicalHosts).pageInfo).hasNextPage -eq $true){
+  $endCursor = (((($result.content | convertFrom-Json).data).physicalHosts).pageInfo).endCursor
+  Write-Host ("Looking at End Cursor " + $endCursor)
+    $variables = "{
+      `"isMultitenancyEnabled`": true,
+      `"hostRoot`": `"WINDOWS_HOST_ROOT`",
+      `"first`": 200,
+      `"filter`": [
+        {
+          `"field`": `"CLUSTER_ID`",
+          `"texts`": [
+            `"$clusterId`"
+          ]
+        },
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_REPLICATED`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_KUPR_HOST`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ],
+      `"sortBy`": `"NAME`",
+      `"sortOrder`": `"ASC`",
+      `"childFilter`": [
+        {
+          `"field`": `"IS_GHOST`",
+          `"texts`": [
+            `"false`"
+          ]
+        },
+        {
+          `"field`": `"IS_RELIC`",
+          `"texts`": [
+            `"false`"
+          ]
+        }
+      ],
+      `"after`": `"${endCursor}`"
+    }"
+
+    $JSON_BODY = @{
+      "variables" = $variables
+      "query" = $query
+    }
+    $JSON_BODY = $JSON_BODY | ConvertTo-Json
+    $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+    $windowsHostInfo += (((($result.content | convertFrom-Json).data).physicalHosts).edges).node
+  }
+  }
+  catch{
+    Write-Error("Error $($_)")
+  }
+  finally{
+    Write-Output $windowsHostInfo
+  }
+}
+
 
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $polSession = connect-rsc
@@ -2137,6 +2457,7 @@ if($OnboardMSSQL){
     $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId #-UnProtectedObjects
     $AGInfo = Get-mssqlAGs -clusterId $clusterId #-UnProtectedObjects
     $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
+    $windowsHosts = Get-PhysicalHost -clusterId $clusterId
     $AssignmentObjects = @()
     ForEach($objectName in $hostlist){ 
         #Availability Groups   
@@ -2147,10 +2468,31 @@ if($OnboardMSSQL){
                 $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AF.Name
                 $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
+                $mssqlObject | wAdd-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
                 $AssignmentObjects += $mssqlObject
             }
         }
+          #Failover Clusters
+          ForEach($SQLHost in $windowsHosts){
+            if($fcinfo.hosts.id -contains $SQLHost.id){
+              foreach($FC in $FCinfo){
+                  if($FC.hosts.id -contains $SQLHost.id){
+                      $instanceList = $FC.instanceDescendantConnection.edges.node
+                      foreach($instance in $instanceList){
+                        $FCObject = New-Object PSobject
+                        $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
+                        $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
+                        $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
+                        $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
+                        $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
+                        $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+                        $AssignmentObjects += $FCObject
+                      }
+                    }
+                }   
+          }
+          }
+
         ForEach($SQLHost in $sqlHostInfo){
             #StandAlone Hosts
             if(($SQLHost).name -match $objectName.servername){
@@ -2164,24 +2506,6 @@ if($OnboardMSSQL){
                         $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                         $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
                         $AssignmentObjects += $mssqlObject
-                }
-                #Failover Clusters
-                if($fcinfo.hosts.id -contains $SQLHost.id){
-                    foreach($FC in $FCinfo){
-                        if($FC.hosts.id -match $SQLHost.id){
-                            $instanceList = $FC.instanceDescendantConnection.edges.node
-                            foreach($instance in $instanceList){
-                                $FCObject = New-Object PSobject
-                                $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
-                                $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
-                                $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
-                                $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
-                                $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                                $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
-                                $AssignmentObjects += $FCObject
-                            }
-                        }
-                    }   
                 }
             }
         }
