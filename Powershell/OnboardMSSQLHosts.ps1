@@ -2468,7 +2468,7 @@ if($OnboardMSSQL){
                 $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AF.Name
                 $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                $mssqlObject | wAdd-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
+                $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
                 $AssignmentObjects += $mssqlObject
             }
         }
@@ -2481,9 +2481,9 @@ if($OnboardMSSQL){
                       foreach($instance in $instanceList){
                         $FCObject = New-Object PSobject
                         $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
-                        $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
+                        $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
                         $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
-                        $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
+                        $FCObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
                         $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                         $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
                         $AssignmentObjects += $FCObject
