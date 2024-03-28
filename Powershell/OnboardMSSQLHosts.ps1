@@ -14,11 +14,15 @@ This will onboard new Windows hosts that were noted in the supplied CSV file to 
 Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding process.
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -OnboardMSSQL
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -GenerateOnboardMSSQLCSV
 
-This will onboard new MSSQL databases by applying protection at either the AG or Host level. Need to update the SLA logic based on tier. For the input CSV the expectation is to have the following headers:
+Generates a CSV that shows the proposed new SLA assignment as well as the current assignment. This allows for human review before sending the generated CSV to the actual assignment phase. 
+serverName,SlaId,failoverClusterName
 
-serverName,SlaId
+.EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -AssignSLA -batched
+
+Assigns the SLAs proposed in the prior step's CSV. Can be batched to group up to 50 MSSQL instances in each API call. 
 
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
@@ -2045,18 +2049,20 @@ function Get-PhysicalHost{
       [parameter(Mandatory=$true)]
       [string]$clusterId,
       [parameter(Mandatory=$false)]
-      [switch]$UnProtectedObjects
+      [switch]$UnProtectedObjects,
+      [parameter(Mandatory=$false)]
+      [string]$ObjectName
   )
   try{
     $variables = "{
       `"isMultitenancyEnabled`": true,
       `"hostRoot`": `"WINDOWS_HOST_ROOT`",
-      `"first`": 200,
+      `"first`": 50,
       `"filter`": [
         {
-          `"field`": `"CLUSTER_ID`",
+          `"field`": `"NAME`",
           `"texts`": [
-            `"$clusterId`"
+            `"$objectName`"
           ]
         },
         {
@@ -2365,8 +2371,6 @@ function Get-PhysicalHost{
     Write-Output $windowsHostInfo
   }
 }
-
-
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $polSession = connect-rsc
 $rubtok = $polSession.access_token
@@ -2461,15 +2465,35 @@ if($GenerateOnboardMSSQLCSV){
     $sqlHostInfo = Get-MssqlHosts -clusterId $clusterId #-UnProtectedObjects
     $AGInfo = Get-mssqlAGs -clusterId $clusterId #-UnProtectedObjects
     $FCinfo = Get-mssqlFCs -clusterId $clusterId #-UnProtectedObjects
-    $windowsHosts = Get-PhysicalHost -clusterId $clusterId
     $AssignmentObjects = @()
+    Write-Host "Resolving failover cluster relationships for any hosts where failoverClusterName is not NULL"
+    ForEach($WindowsMachine in $hostlist){
+      if($WindowsMachine.failoverClusterName -ne "NULL"){
+        Write-Host ("Looking up windows host information to compare FC membership for object " + $WindowsMachine.ServerName)
+        $FC = $FCinfo | Where-Object {$_.name -match $WindowsMachine.failoverClusterName}
+        $instanceList = $FC.instanceDescendantConnection.edges.node
+        foreach($instance in $instanceList){
+          $FCObject = New-Object PSobject
+          $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $WindowsMachine.ServerName
+          $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
+          $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue "notApplicable"
+          $FCObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
+          $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $WindowsMachine.slaID
+          $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+          $FCObject | Add-Member -NotePropertyName "currentSlaId" -NotePropertyValue ($instance.effectiveSlaDomain).id
+          $FCObject | Add-Member -NotePropertyName "currentSlaName" -NotePropertyValue ($instance.effectiveSlaDomain).name
+          $AssignmentObjects += $FCObject
+        }
+      }
+    }
     ForEach($objectName in $hostlist){ 
         #Availability Groups   
         ForEach($AG in $AGInfo){
             if((($AG.instances).logicalPath).name -match $objectName.Servername){
                 $mssqlObject = New-Object PSobject
                 $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
-                $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AF.Name
+                $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AG.Name
+                $mssqlObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue "notApplicable"
                 $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                 $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
@@ -2478,28 +2502,6 @@ if($GenerateOnboardMSSQLCSV){
                 $AssignmentObjects += $mssqlObject
             }
         }
-          #Failover Clusters
-          ForEach($SQLHost in $windowsHosts){
-            if($fcinfo.hosts.id -contains $SQLHost.id){
-              foreach($FC in $FCinfo){
-                  if($FC.hosts.id -contains $SQLHost.id){
-                      $instanceList = $FC.instanceDescendantConnection.edges.node
-                      foreach($instance in $instanceList){
-                        $FCObject = New-Object PSobject
-                        $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
-                        $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
-                        $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue $SQLHost.id
-                        $FCObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
-                        $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
-                        $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
-                        $FCObject | Add-Member -NotePropertyName "currentSlaId" -NotePropertyValue ($instance.effectiveSlaDomain).id
-                        $FCObject | Add-Member -NotePropertyName "currentSlaName" -NotePropertyValue ($instance.effectiveSlaDomain).name
-                        $AssignmentObjects += $FCObject
-                      }
-                    }
-                }   
-          }
-          }
         ForEach($SQLHost in $sqlHostInfo){
             if($SQLHost.name -match $objectName.ServerName){
             #StandAlone Hosts
@@ -2561,24 +2563,24 @@ if($AssignSLA){
     $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/AssignedSLAMSSQL-" +$mdate + ".csv")
     Write-Host "Disconnecting From Rubrik Security Cloud."
     disconnect-rsc
-}
-else{
-    $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
-    $AssignmentObjectsIndex = 1
-    foreach($Object in $AssignmentObjects){
-        $objectId = $object.instanceId | ConvertTo-Json
-        Write-Host "======================================================================================================================================================================================================"
-        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
-        Write-Host "======================================================================================================================================================================================================"
-        Write-Host "API Output:"
-        Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
-        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
-        $AssignmentObjectsIndex++
-    }
-    Write-Host "======================================================================================================================================================================================================"
-    Write-Host ("Writing CSV file to "  + $Output_directory + "/AssignedSLAMSSQL-" + $mdate + ".csv")
-    $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/AssignedSLAMSSQL-" +$mdate + ".csv")
-    Write-Host "Disconnecting From Rubrik Security Cloud."
-    disconnect-rsc
-}
+  }
+  else{
+      $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
+      $AssignmentObjectsIndex = 1
+      foreach($Object in $AssignmentObjects){
+          $objectId = $object.instanceId | ConvertTo-Json
+          Write-Host "======================================================================================================================================================================================================"
+          Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
+          Write-Host "======================================================================================================================================================================================================"
+          Write-Host "API Output:"
+          Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
+          Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
+          $AssignmentObjectsIndex++
+      }
+      Write-Host "======================================================================================================================================================================================================"
+      Write-Host ("Writing CSV file to "  + $Output_directory + "/AssignedSLAMSSQL-" + $mdate + ".csv")
+      $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/AssignedSLAMSSQL-" +$mdate + ".csv")
+      Write-Host "Disconnecting From Rubrik Security Cloud."
+      disconnect-rsc
+  }
 }
