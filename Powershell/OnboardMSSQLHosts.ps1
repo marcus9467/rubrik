@@ -44,7 +44,11 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$GatherMSSQLHosts,
     [parameter(Mandatory=$false)]
-    [switch]$batched
+    [switch]$batched,
+    [parameter(Mandatory=$false)]
+    [switch]$GenerateOnboardMSSQLCSV,
+    [parameter(Mandatory=$false)]
+    [switch]$AssignSLA
 )
 
 function connect-rsc {
@@ -2052,7 +2056,7 @@ function Get-PhysicalHost{
         {
           `"field`": `"CLUSTER_ID`",
           `"texts`": [
-            `"39b92c18-d897-4b55-a7f9-17ff178616d0`"
+            `"$clusterId`"
           ]
         },
         {
@@ -2445,7 +2449,7 @@ if($GatherMSSQLHosts){
     $UnprotectedSql | Export-Csv -NoTypeInformation ($Output_directory + "/UnprotectedMssqlHosts" +$mdate + ".csv")
     disconnect-rsc
 }
-if($OnboardMSSQL){
+if($GenerateOnboardMSSQLCSV){
     $hostlist = Import-Csv $CSV
     $hostlistCount = ($hostlist | Measure-Object).Count
     $Output_directory = (Get-Location).path
@@ -2492,10 +2496,10 @@ if($OnboardMSSQL){
                 }   
           }
           }
-
         ForEach($SQLHost in $sqlHostInfo){
+            if($SQLHost.name -match $objectName.ServerName){
             #StandAlone Hosts
-            if(($SQLHost).name -match $objectName.servername){
+              if(($SQLHost).name -match $objectName.servername){
                 $instanceList = $sqlHost.instanceDescendantConnection.edges.node
                 foreach($instance in $instanceList){
                         $mssqlObject = New-Object PSobject
@@ -2507,61 +2511,68 @@ if($OnboardMSSQL){
                         $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
                         $AssignmentObjects += $mssqlObject
                 }
+              }
             }
         }
     }
     $AssignmentObjects = $AssignmentObjects | Sort-Object -Unique {$_.instanceId}
-    if($batched){
-        # Assuming $AssignmentObjects is already populated
-        # Group by SLAId
-        $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
-        Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
-        foreach ($group in $groupedObjects) {
-            $slaId = $group.Name
-            $allIds = $group.Group.instanceId
+    Write-Host ("Writing CSV file to "  + $Output_directory + "/mssqlAssignmentList-" + $mdate + ".csv")
+    $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/mssqlAssignmentList-" +$mdate + ".csv")
+Disconnect-Rsc
+}
+if($AssignSLA){
+  $AssignmentObjects = Import-Csv $CSV
+  if($batched){
+    # Assuming $AssignmentObjects is already populated
+    # Group by SLAId
+    $groupedObjects = $AssignmentObjects | Group-Object -Property slaId
+    Write-host "Grouping MSSQL objects into batches of 50 based on the supplied SLA domains"
+    foreach ($group in $groupedObjects) {
+        $slaId = $group.Name
+        $allIds = $group.Group.instanceId
 
-            # Split into batches of 50
-            $batches = [System.Collections.Generic.List[object]]::new()
-            foreach ($id in $allIds) {
-             $batches.Add($id)
-                if ($batches.Count -eq 50) {
-                    Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
-                    Write-Host "======================================================================================================================================================================================================"
-                    Write-Host "API Output:"
-                    Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
-                    $batches.Clear()
-                }
-            }
-            # Process remaining items if any
-            if ($batches.Count -gt 0) {
+        # Split into batches of 50
+        $batches = [System.Collections.Generic.List[object]]::new()
+        foreach ($id in $allIds) {
+         $batches.Add($id)
+            if ($batches.Count -eq 50) {
                 Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
                 Write-Host "======================================================================================================================================================================================================"
                 Write-Host "API Output:"
                 Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
+                $batches.Clear()
             }
         }
-        Write-Host ("Writing CSV file to "  + $Output_directory + "/mssqlAssignmentList-" + $mdate + ".csv")
-        $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/mssqlAssignmentList-" +$mdate + ".csv")
-        Write-Host "Disconnecting From Rubrik Security Cloud."
-        disconnect-rsc
-    }
-    else{
-        $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
-        $AssignmentObjectsIndex = 1
-        foreach($Object in $AssignmentObjects){
-            $objectId = $object.instanceId | ConvertTo-Json
-            Write-Host "======================================================================================================================================================================================================"
-            Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
+        # Process remaining items if any
+        if ($batches.Count -gt 0) {
+            Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
             Write-Host "======================================================================================================================================================================================================"
             Write-Host "API Output:"
-            Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
-            Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
-            $AssignmentObjectsIndex++
+            Set-mssqlSlasBatch -slaId $slaId -ObjectIds ($batches | ConvertTo-Json)
         }
-        Write-Host "======================================================================================================================================================================================================"
-        Write-Host ("Writing CSV file to "  + $Output_directory + "/mssqlAssignmentList-" + $mdate + ".csv")
-        $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/mssqlAssignmentList-" +$mdate + ".csv")
-        Write-Host "Disconnecting From Rubrik Security Cloud."
-        disconnect-rsc
     }
+    Write-Host ("Writing CSV file to "  + $Output_directory + "/AssignedSLAMSSQL-" + $mdate + ".csv")
+    $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/AssignedSLAMSSQL-" +$mdate + ".csv")
+    Write-Host "Disconnecting From Rubrik Security Cloud."
+    disconnect-rsc
+}
+else{
+    $AssignmentObjectsCount = ($AssignmentObjects | Measure-Object).count
+    $AssignmentObjectsIndex = 1
+    foreach($Object in $AssignmentObjects){
+        $objectId = $object.instanceId | ConvertTo-Json
+        Write-Host "======================================================================================================================================================================================================"
+        Write-Output ("Assigning SLA "+ $object.slaid + " to Object " + $object.Name + " with object Id " + $objectId)
+        Write-Host "======================================================================================================================================================================================================"
+        Write-Host "API Output:"
+        Set-mssqlSlasBatch -ObjectIds $objectId -slaId $object.slaId
+        Write-Host ("Assigned SLA to object " + $AssignmentObjectsIndex + " of " + $AssignmentObjectsCount)
+        $AssignmentObjectsIndex++
+    }
+    Write-Host "======================================================================================================================================================================================================"
+    Write-Host ("Writing CSV file to "  + $Output_directory + "/AssignedSLAMSSQL-" + $mdate + ".csv")
+    $AssignmentObjects | Export-Csv -NoTypeInformation ($Output_directory + "/AssignedSLAMSSQL-" +$mdate + ".csv")
+    Write-Host "Disconnecting From Rubrik Security Cloud."
+    disconnect-rsc
+}
 }
