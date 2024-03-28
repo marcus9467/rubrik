@@ -2473,6 +2473,8 @@ if($GenerateOnboardMSSQLCSV){
                 $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $AG.id
                 $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                 $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "availabilityGroup"
+                $mssqlObject | Add-Member -NotePropertyName "currentSlaId" -NotePropertyValue ($instance.effectiveSlaDomain).id
+                $mssqlObject | Add-Member -NotePropertyName "currentSlaName" -NotePropertyValue ($instance.effectiveSlaDomain).name
                 $AssignmentObjects += $mssqlObject
             }
         }
@@ -2490,6 +2492,8 @@ if($GenerateOnboardMSSQLCSV){
                         $FCObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
                         $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                         $FCObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "failoverCluster"
+                        $FCObject | Add-Member -NotePropertyName "currentSlaId" -NotePropertyValue ($instance.effectiveSlaDomain).id
+                        $FCObject | Add-Member -NotePropertyName "currentSlaName" -NotePropertyValue ($instance.effectiveSlaDomain).name
                         $AssignmentObjects += $FCObject
                       }
                     }
@@ -2509,6 +2513,8 @@ if($GenerateOnboardMSSQLCSV){
                         $mssqlObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id
                         $mssqlObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $ObjectName.slaID
                         $mssqlObject | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue "standAlone"
+                        $mssqlObject | Add-Member -NotePropertyName "currentSlaId" -NotePropertyValue ($instance.effectiveSlaDomain).id
+                        $mssqlObject | Add-Member -NotePropertyName "currentSlaName" -NotePropertyValue ($instance.effectiveSlaDomain).name
                         $AssignmentObjects += $mssqlObject
                 }
               }
