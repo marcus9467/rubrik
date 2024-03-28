@@ -14,13 +14,13 @@ This will onboard new Windows hosts that were noted in the supplied CSV file to 
 Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding process.
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -GenerateOnboardMSSQLCSV
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -GenerateOnboardMSSQLCSV -clusterId $clusterId
 
 Generates a CSV that shows the proposed new SLA assignment as well as the current assignment. This allows for human review before sending the generated CSV to the actual assignment phase. 
 serverName,SlaId,failoverClusterName
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -AssignSLA -batched
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -AssignSLA -batched  -clusterId $clusterId
 
 Assigns the SLAs proposed in the prior step's CSV. Can be batched to group up to 50 MSSQL instances in each API call. 
 
@@ -2473,6 +2473,7 @@ if($GenerateOnboardMSSQLCSV){
         $FC = $FCinfo | Where-Object {$_.name -match $WindowsMachine.failoverClusterName}
         $instanceList = $FC.instanceDescendantConnection.edges.node
         foreach($instance in $instanceList){
+          Write-Host ("Gathering Information for FC " + $FC.Name)
           $FCObject = New-Object PSobject
           $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $WindowsMachine.ServerName
           $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
@@ -2490,6 +2491,7 @@ if($GenerateOnboardMSSQLCSV){
         #Availability Groups   
         ForEach($AG in $AGInfo){
             if((($AG.instances).logicalPath).name -match $objectName.Servername){
+                Write-Host ("Gathering Information for AG " + $AG.Name)
                 $mssqlObject = New-Object PSobject
                 $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
                 $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $AG.Name
@@ -2508,6 +2510,7 @@ if($GenerateOnboardMSSQLCSV){
               if(($SQLHost).name -match $objectName.servername){
                 $instanceList = $sqlHost.instanceDescendantConnection.edges.node
                 foreach($instance in $instanceList){
+                        Write-Host ("Gathering Information for SQLHost " + $objectName.ServerName)
                         $mssqlObject = New-Object PSobject
                         $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
                         $mssqlObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue "notApplicable"
@@ -2530,6 +2533,7 @@ Disconnect-Rsc
 }
 if($AssignSLA){
   $AssignmentObjects = Import-Csv $CSV
+  $Output_directory = (Get-Location).path
   if($batched){
     # Assuming $AssignmentObjects is already populated
     # Group by SLAId
