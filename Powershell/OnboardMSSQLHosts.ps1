@@ -25,7 +25,7 @@ serverName,SlaId,failoverClusterName
 Assigns the SLAs proposed in the prior step's CSV. Can be batched to group up to 50 MSSQL instances in each API call. 
 
 .EXAMPLE
-./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceAccountJson -clusterId $clusterId -cdmValidate -CSV ./mssqlAssignmentList-202403281151.csv -clusterIP "10.8.49.104"
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceAccountJson -clusterId $clusterId -cdmValidate -CSV ./mssqlAssignmentList-202403281151.csv -clusterIP $clusterIp
 
 Validates the SLA assignment with the local CDM using the CSV produced by either the AssignSLA or GenerateOnboardMSSQLCSV flags, and produces a CSV for human review.
 
