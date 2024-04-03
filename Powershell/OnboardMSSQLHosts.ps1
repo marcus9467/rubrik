@@ -24,6 +24,11 @@ serverName,SlaId,failoverClusterName
 
 Assigns the SLAs proposed in the prior step's CSV. Can be batched to group up to 50 MSSQL instances in each API call. 
 
+.EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceAccountJson -clusterId $clusterId -cdmValidate -CSV ./mssqlAssignmentList-202403281151.csv -clusterIP "10.8.49.104"
+
+Validates the SLA assignment with the local CDM using the CSV produced by either the AssignSLA or GenerateOnboardMSSQLCSV flags, and produces a CSV for human review.
+
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
     Created : March 15, 2024
@@ -52,7 +57,11 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$GenerateOnboardMSSQLCSV,
     [parameter(Mandatory=$false)]
-    [switch]$AssignSLA
+    [switch]$AssignSLA,
+    [parameter(Mandatory=$false)]
+    [string]$clusterIP,
+    [parameter(Mandatory=$false)]
+    [switch]$cdmValidate
 )
 
 function connect-rsc {
@@ -2371,6 +2380,38 @@ function Get-PhysicalHost{
     Write-Output $windowsHostInfo
   }
 }
+function Connect-RubrikCdm{
+  [CmdletBinding()]
+  param (
+      [parameter(Mandatory=$true)]
+      [string]$clusterId,
+      [parameter(Mandatory=$true)]
+      [string]$serviceAccountJson
+  )
+  try{
+      $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
+        $connectionData = [ordered]@{
+            'client_id' = $serviceAccountObj.client_id
+            'client_secret' = $serviceAccountObj.client_secret
+            'cluster_uuid' = $clusterId
+        } | ConvertTo-Json
+        $cdmTokenUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "cdm_client_token")
+        #$uriString = "https://$($clusterIp)/api/v1/service_account/session"
+
+    $rubrikCdm = Invoke-RestMethod -Method Post -uri $cdmTokenUrl -ContentType application/json -body $connectionData -skipcertificateCheck
+  }
+  catch{
+    Write-Error("Error $($_)")
+  }
+  finally{
+    Write-Output $rubrikCdm
+  }
+}
+
+
+
+
+
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
 $polSession = connect-rsc
 $rubtok = $polSession.access_token
@@ -2534,6 +2575,7 @@ Disconnect-Rsc
 if($AssignSLA){
   $AssignmentObjects = Import-Csv $CSV
   $Output_directory = (Get-Location).path
+  $mdate = (Get-Date).tostring("yyyyMMddHHmm")
   if($batched){
     # Assuming $AssignmentObjects is already populated
     # Group by SLAId
@@ -2587,4 +2629,35 @@ if($AssignSLA){
       Write-Host "Disconnecting From Rubrik Security Cloud."
       disconnect-rsc
   }
+}
+if($cdmValidate){
+  $Output_directory = (Get-Location).path
+  $mdate = (Get-Date).tostring("yyyyMMddHHmm")
+  #Establish Session to Local CDM
+  $rubrikConnection = Connect-RubrikCdm -clusterId $clusterId -serviceAccountJson $ServiceAccountJson
+  $rubtok = ($rubrikConnection.session).token
+  $RubrikToken =  @{'Authorization' = ("Bearer $rubtok")}
+  
+  #Import Assignment CSV to check SLA Status
+  $sqlList = Import-Csv $CSV
+  $AssignmentConfirmList = @()
+  ForEach($instance in $sqlList){
+    if($instance.assignmentType -eq "standAlone"){
+      Write-Output ("Investigating SLA for SQL Host " + $instance.hostName)
+      $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.hostName +"&object_type=Host,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+    }
+    if($instance.assignmentType -eq "availabilityGroup"){
+      Write-Output ("Investigating SLA for SQL Availability Group " + $instance.sqlClusterName)
+      $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName + "&object_type=MssqlAvailabilityGroup,MssqlDatabase&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+    }
+    if($instance.assignmentType -eq "failoverCluster"){
+      Write-Output ("Investigating SLA for SQL Failover Cluster " + $instance.sqlClusterName)
+      $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName +"&object_type=WindowsCluster,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+    }
+    
+    $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
+    $AssignmentConfirmList += $singleInstance
+  }
+  Write-Host ("Writing CSV file to "  + $Output_directory + "/cdmValidateList-" + $mdate + ".csv")
+  $AssignmentConfirmList | Export-Csv -NoTypeInformation ($Output_directory + "/cdmValidateList-" +$mdate + ".csv")
 }
