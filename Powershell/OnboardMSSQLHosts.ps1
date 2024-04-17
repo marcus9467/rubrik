@@ -2447,24 +2447,64 @@ if($cdmValidate){
       if($instance.assignmentType -eq "standAlone"){
         Write-Output ("Investigating SLA for SQL Host " + $instance.hostName)
         $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.hostName +"&object_type=Host,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
-      }
+        $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
+        $instanceInfo = $singleinstance.instanceChildren
+        if (-not ([string]::IsNullOrEmpty($instanceInfo))){
+            ForEach($childinstance in $instanceInfo){
+                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+                $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
+                ForEach($DB in $DBinfo){
+                    $DBSummaryInfo = New-Object PSobject
+                    $DBSummaryInfo | Add-Member -NotePropertyName "hostname" -NotePropertyValue $instance.hostName
+                    $DBSummaryInfo | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $instance.sqlClusterName
+                    $DBSummaryInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue $instance.assignmentType
+                    $DBSummaryInfo | Add-Member -NotePropertyName "databaseName" -NotePropertyValue $DB.name
+                    $DBSummaryInfo | Add-Member -NotePropertyName "databaseId" -NotePropertyValue $DB.ID
+                    $DBSummaryInfo | Add-Member -NotePropertyName "effectiveSlaAssignment" -NotePropertyValue $DB.effectiveSlaDomainName
+                    $AssignmentConfirmList += $DBSummaryInfo
+                }
+            }
+        }
+    }
       if($instance.assignmentType -eq "availabilityGroup"){
         Write-Output ("Investigating SLA for SQL Availability Group " + $instance.sqlClusterName)
-        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName + "&object_type=MssqlAvailabilityGroup,MssqlDatabase&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
-      }
+        $AGInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName + "&object_type=MssqlAvailabilityGroup,MssqlDatabase&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $AGInstance = ($AGInstance.content | ConvertFrom-Json).data
+        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/"+ $AGInstance.id + "/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $DBinfo = ($singleinstance.content | ConvertFrom-Json).data
+        ForEach($DB in $DBinfo){
+            $DBSummaryInfo = New-Object PSobject
+            $DBSummaryInfo | Add-Member -NotePropertyName "hostname" -NotePropertyValue $instance.hostName
+            $DBSummaryInfo | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $instance.sqlClusterName
+            $DBSummaryInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue $instance.assignmentType
+            $DBSummaryInfo | Add-Member -NotePropertyName "databaseName" -NotePropertyValue $DB.name
+            $DBSummaryInfo | Add-Member -NotePropertyName "databaseId" -NotePropertyValue $DB.ID
+            $DBSummaryInfo | Add-Member -NotePropertyName "effectiveSlaAssignment" -NotePropertyValue $DB.effectiveSlaDomainName
+            $AssignmentConfirmList += $DBSummaryInfo
+            }
+    }
       if($instance.assignmentType -eq "failoverCluster"){
         Write-Output ("Investigating SLA for SQL Failover Cluster " + $instance.sqlClusterName)
         $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName +"&object_type=WindowsCluster,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
-      }
-      
-      $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
-      $instanceInfo = $singleinstance.instanceChildren
-      ForEach($childinstance in $instanceInfo){
-        $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
-        $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
-        $AssignmentConfirmList += $DBInfo
-    }
-      
+        $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
+        $instanceInfo = $singleinstance.instanceChildren
+        if (-not ([string]::IsNullOrEmpty($instanceInfo))){
+            ForEach($childinstance in $instanceInfo){
+                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+                $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
+                ForEach($DB in $DBinfo){
+                    $DBSummaryInfo = New-Object PSobject
+                    $DBSummaryInfo | Add-Member -NotePropertyName "hostname" -NotePropertyValue $instance.hostName
+                    $DBSummaryInfo | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $instance.sqlClusterName
+                    $DBSummaryInfo | Add-Member -NotePropertyName "assignmentType" -NotePropertyValue $instance.assignmentType
+                    $DBSummaryInfo | Add-Member -NotePropertyName "databaseName" -NotePropertyValue $DB.name
+                    $DBSummaryInfo | Add-Member -NotePropertyName "databaseId" -NotePropertyValue $DB.ID
+                    $DBSummaryInfo | Add-Member -NotePropertyName "effectiveSlaAssignment" -NotePropertyValue $DB.effectiveSlaDomainName
+                    $AssignmentConfirmList += $DBSummaryInfo
+                    }
+                }
+            }
+        }
     }
     Write-Host ("Writing CSV file to "  + $Output_directory + "/cdmValidateList-" + $mdate + ".csv")
     $AssignmentConfirmList | Export-Csv -NoTypeInformation ($Output_directory + "/cdmValidateList-" +$mdate + ".csv")
