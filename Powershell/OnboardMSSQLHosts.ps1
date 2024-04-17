@@ -2417,8 +2417,8 @@ function Connect-RubrikSpecialCdm{
     try{
         $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
           $connectionData = [ordered]@{
-              'serviceAccountId' = $serviceAccountObj.client_id
-              'secret' = $serviceAccountObj.client_secret
+              'serviceAccountId' = $serviceAccountObj.id
+              'secret' = $serviceAccountObj.secret
           } | ConvertTo-Json
           $uriString = "https://$($clusterIp)/api/v1/service_account/session"
   
@@ -2458,9 +2458,14 @@ if($cdmValidate){
       }
       
       $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
-      $AssignmentConfirmList += $singleInstance
+      $instanceInfo = $singleinstance.instanceChildren
+      ForEach($childinstance in $instanceInfo){
+        $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
+        $AssignmentConfirmList += $DBInfo
     }
-    #Wait-Debugger
+      
+    }
     Write-Host ("Writing CSV file to "  + $Output_directory + "/cdmValidateList-" + $mdate + ".csv")
     $AssignmentConfirmList | Export-Csv -NoTypeInformation ($Output_directory + "/cdmValidateList-" +$mdate + ".csv")
 exit  
@@ -2650,6 +2655,7 @@ if($AssignSLA){
                 $batches.Clear()
             }
         }
+
         # Process remaining items if any
         if ($batches.Count -gt 0) {
             Write-Host ("Applying SLA to the following Objects " + $batches.ToArray())
