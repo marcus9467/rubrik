@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-This script will onboard new MSSQL hosts based on a provided CSV file and then later assign protection to MSSQL Databases.
+The purpose of this script is to update the log policy on existing databases to inherit the policy defined within the assigned SLA. 
 
 .EXAMPLE
 ./Update-LogPolicy.ps1 -ServiceAccountJson $serviceAccountJson -CSV DatabaseList.csv
