@@ -170,6 +170,7 @@ function Update-LogPolicy{
         }
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $result = (((($result.Content |ConvertFrom-Json).data).bulkUpdateMssqlDbs).items).mssqlDbSummary
     }
     catch{
         Write-Error("Error $($_)")
@@ -179,7 +180,6 @@ function Update-LogPolicy{
     }
         
 }
-
 function Group-Records {
     param(
         [Parameter(Mandatory = $true)]
