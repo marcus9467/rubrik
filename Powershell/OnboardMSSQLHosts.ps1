@@ -2607,7 +2607,7 @@ if($GenerateOnboardMSSQLCSV){
     $AssignmentObjects = @()
     Write-Host "Resolving failover cluster relationships for any hosts where failoverClusterName is not NULL"
     ForEach($WindowsMachine in $hostlist){
-      if($WindowsMachine.failoverClusterName -ne "NULL"){
+      if(-not ([string]::IsNullOrEmpty($WindowsMachine.failoverClusterName)) -xor ($WindowsMachine.failoverClusterName -ne "NULL")){
         Write-Host ("Looking up windows host information to compare FC membership for object " + $WindowsMachine.ServerName)
         $FC = $FCinfo | Where-Object {$_.name -match $WindowsMachine.failoverClusterName}
         $instanceList = $FC.instanceDescendantConnection.edges.node
@@ -2615,7 +2615,7 @@ if($GenerateOnboardMSSQLCSV){
           Write-Host ("Gathering Information for FC " + $FC.Name)
           $FCObject = New-Object PSobject
           $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $WindowsMachine.ServerName
-          $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name
+          $FCObject | Add-Member -NotePropertyName "sqlClusterName" -NotePropertyValue $FC.Name -join ","
           $FCObject | Add-Member -NotePropertyName "hostId" -NotePropertyValue "notApplicable"
           $FCObject | Add-Member -NotePropertyName "instanceId" -NotePropertyValue $instance.id 
           $FCObject | Add-Member -NotePropertyName "slaId" -NotePropertyValue $WindowsMachine.slaID
