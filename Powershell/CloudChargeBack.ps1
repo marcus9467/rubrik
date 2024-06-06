@@ -11,6 +11,11 @@ CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFT
 .EXAMPLE
 ./CloudChargeBack.ps1 -ServiceAccountJson $serviceAccountJson
 
+.EXAMPLE
+./CloudChargeBack.ps1 -ServiceAccountJson $serviceAccountJson -tagmatch "Kubernetes"
+
+Filteres the output to only include tags with Kubernetes in the key value.
+
 .NOTES
     Author  : Tony Koziana <Tony.Koziana@rubrik.com> and Marcus Henderson <marcus.henderson@rubrik.com
     Created : May 23, 2024
@@ -19,7 +24,9 @@ CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFT
 [cmdletbinding()]
 param (
     [parameter(Mandatory=$true)]
-    [string]$ServiceAccountJson
+    [string]$ServiceAccountJson,
+    [parameter(Mandatory=$false)]
+    [string]$tagmatch
 )
 function connect-polaris {
     # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
@@ -122,6 +129,7 @@ function Get-CloudNativeCapacity{
                   name
                   objectType
                   usedBytes
+                  provisionedBytes
                   physicalBytes
                   replicaStorage
                   archiveStorage
@@ -316,11 +324,15 @@ ForEach ($id in $masterTagsList){
         $CloudSummaryInfo | Add-Member -NotePropertyName "objectType" -NotePropertyValue $id.objectType
         $CloudSummaryInfo | Add-Member -NotePropertyName "usedBytes" -NotePropertyValue $VMCapacityInfo.usedBytes
         $CloudSummaryInfo | Add-Member -NotePropertyName "PhysicalBytes" -NotePropertyValue $VMCapacityInfo.physicalBytes
+        $CloudSummaryInfo | Add-Member -NotePropertyName "provisionedBytes" -NotePropertyValue $VMCapacityInfo.provisionedBytes
         $CloudSummaryInfo | Add-Member -NotePropertyName "ReplicaBytes" -NotePropertyValue $VMCapacityInfo.replicaStorage
         $CloudSummaryInfo | Add-Member -NotePropertyName "ArchiveBytes" -NotePropertyValue $VMCapacityInfo.archiveStorage
         $chargebackInfo += $CloudSummaryInfo
         #$index++
     }
+}
+if($tagmatch){
+  $chargebackInfo = $chargebackInfo | Where-Object {$_.TagKey -match $tagmatch}
 }
 Write-Output ("CSV has been written to " + $Output_directory + "/RubrikCloudNativeCapacityReport-" + $mdate + ".csv")
 $chargebackInfo | Export-Csv -NoTypeInformation ($Output_directory + "/RubrikCloudNativeCapacityReport-" + $mdate + ".csv")
