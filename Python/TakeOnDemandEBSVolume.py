@@ -2,16 +2,14 @@ import json
 import requests
 import argparse
 
-def get_access_token(service_account_file):
+def get_service_account_details(service_account_file):
     # Load service account JSON file
     with open(service_account_file, 'r') as file:
         service_account = json.load(file)
 
-    # Extract necessary fields
-    client_id = service_account['client_id']
-    client_secret = service_account['client_secret']
-    access_token_uri = service_account['access_token_uri']
+    return service_account
 
+def get_access_token(client_id, client_secret, access_token_uri):
     # Prepare the connection data
     connection_data = {
         'client_id': client_id,
@@ -67,18 +65,23 @@ def take_ebs_volume_snapshot(api_url, access_token, ebs_volume_id, sla_id):
 
 def main():
     parser = argparse.ArgumentParser(description='Take an EBS volume snapshot using Rubrik GraphQL API.')
-    parser.add_argument('--api-url', required=True, help='Rubrik API endpoint URL.')
     parser.add_argument('--service-account-file', required=True, help='Path to the service account JSON file.')
     parser.add_argument('--ebs-volume-id', required=True, help='EBS volume ID to snapshot.')
     parser.add_argument('--sla-id', required=True, help='SLA ID for the snapshot retention.')
 
     args = parser.parse_args()
 
+    # Get service account details
+    service_account = get_service_account_details(args.service_account_file)
+
     # Get the access token
-    access_token = get_access_token(args.service_account_file)
+    access_token = get_access_token(service_account['client_id'], service_account['client_secret'], service_account['access_token_uri'])
+
+    # Define the API URL
+    api_url = service_account['access_token_uri'].replace('/api/client_token', '/graphql')
 
     # Call the function and print the result
-    result = take_ebs_volume_snapshot(args.api_url, access_token, args.ebs_volume_id, args.sla_id)
+    result = take_ebs_volume_snapshot(api_url, access_token, args.ebs_volume_id, args.sla_id)
     print(result)
 
 if __name__ == '__main__':
