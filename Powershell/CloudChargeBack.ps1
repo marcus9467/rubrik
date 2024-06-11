@@ -135,7 +135,9 @@ function Get-CloudNativeCapacity{
                   archiveStorage
                   ncdArchiveStorage: archiveStorage
                   pullTime
-                  slaDomain
+                  slaDomain {
+                    name
+                  }
                   protectionStatus
                 }
               }
@@ -323,8 +325,8 @@ ForEach ($id in $masterTagsList){
         $CloudSummaryInfo | Add-Member -NotePropertyName "TagKey" -NotePropertyValue $tag.key
         $CloudSummaryInfo | Add-Member -NotePropertyName "ObjectID" -NotePropertyValue $id.id
         $CloudSummaryInfo | Add-Member -NotePropertyName "VM_Name" -NotePropertyValue $id.name
-        $CloudSummaryInfo | Add-Member -NotePropertyName "slaDomain" -NotePropertyValue $VMCapacityInfo.slaDomain
-        $CloudSummaryInfo | Add-Member -NotePropertyName "objectType" -NotePropertyValue $VMCapacityInfo.protectionStatus
+        $CloudSummaryInfo | Add-Member -NotePropertyName "slaDomain" -NotePropertyValue $VMCapacityInfo.slaDomain.name
+        $CloudSummaryInfo | Add-Member -NotePropertyName "protectionStatus" -NotePropertyValue $VMCapacityInfo.protectionStatus
         $CloudSummaryInfo | Add-Member -NotePropertyName "objectType" -NotePropertyValue $id.objectType
         $CloudSummaryInfo | Add-Member -NotePropertyName "usedBytes" -NotePropertyValue $VMCapacityInfo.usedBytes
         $CloudSummaryInfo | Add-Member -NotePropertyName "PhysicalBytes" -NotePropertyValue $VMCapacityInfo.physicalBytes
