@@ -4,19 +4,19 @@
 This script will extract compliance and snapshot information for all CDM clusters in a given RSC environment. Filters are available for both clusters and slas. 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report.
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the clusterUUIDs specified 
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the SLAIDs specified. The SLAIDs can either be the local CDM IDs, or the global RSC FIDs
 
@@ -636,217 +636,337 @@ function get-info{
   }
 
 }
-function get-SnapshotInfo{
+function get-SnapshotInfo {
   [CmdletBinding()]
-
   param (
       [parameter(Mandatory=$true)]
       [string]$snappableId
       #snappableId = FID, not ID
   )
   process {
-      try{
-          $snappableInfo = @()
+      try {
           $variables = "{
-              `"snappableId`": `"${snappableId}`",
-              `"first`": 50,
-              `"sortBy`": `"CREATION_TIME`",
-              `"sortOrder`": `"DESC`",
-              `"snapshotFilter`": [
-                {
-                  `"field`": `"SNAPSHOT_TYPE`",
-                  `"typeFilters`": []
-                },
-                {
-                  `"field`": `"IS_LEGALLY_HELD`",
-                  `"text`": `"false`"
+            `"first`": 50,
+            `"filter`": {
+              `"objectFid`": `"${snappableId}`"
+            }
+          }"
+          $query = "query MarcusSnappableType(`$first: Int!, `$filter: SnappableFilterInput, `$after: String, `$sortBy: SnappableSortByEnum, `$sortOrder: SortOrder) {
+            snappableConnection(first: `$first, filter: `$filter, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
+              edges {
+                node {
+                  id
+                  fid
+                  name
+                  objectType
+                  complianceStatus
+                  location
+                  localSnapshots
+                  replicaSnapshots
+                  archiveSnapshots
+                  totalSnapshots
+                  missedSnapshots
                 }
-              ],
-              `"timeRange`": {
-                  `"start`": `"${startDate}`",
-                  `"end`": `"${currentDate}`"
-                }
-            }"
+              }
+            }
+          }"
+          $JSON_BODY = @{
+            "variables" = $variables
+            "query" = $query
+          }
+          $JSON_BODY = $JSON_BODY | ConvertTo-Json
+          $snappableTypeInfo = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+          $snappableTypeInfo = (((($snappableTypeInfo.content | ConvertFrom-Json).data).snappableConnection).edges).node
 
-          $query = "query SnapshotsListSingleQuery(`$snappableId: String!, `$first: Int, `$after: String, `$snapshotFilter: [SnapshotQueryFilterInput!], `$sortBy: SnapshotQuerySortByField, `$sortOrder: SortOrder, `$timeRange: TimeRangeInput) {
-              snapshotsListConnection: snapshotOfASnappableConnection(workloadId: `$snappableId, first: `$first, after: `$after, snapshotFilter: `$snapshotFilter, sortBy: `$sortBy, sortOrder: `$sortOrder, timeRange: `$timeRange) {
-                edges {
-                  cursor
-                  node {
-                    ...CdmSnapshotLatestUserNotesFragment
-                    id
-                    date
-                    expirationDate
-                    isOnDemandSnapshot
-                    ... on CdmSnapshot {
-                      cdmVersion
-                      isRetentionLocked
-                      isDownloadedSnapshot
-                      cluster {
-                        id
-                        name
-                        version
-                        status
-                        timezone
-                      }
-                      pendingSnapshotDeletion {
-                        id: snapshotFid
-                        status
-                      }
-                      slaDomain {
-                        ...EffectiveSlaDomainFragment
-                      }
-                      pendingSla {
-                        ...SLADomainFragment
-                      }
-                      snapshotRetentionInfo {
-                        isCustomRetentionApplied
-                        archivalInfos {
+          if ($snappableTypeInfo.objectType -ne "Mssql") {
+              $snappableInfo = @()
+              $variables = "{
+                `"snappableId`": `"${snappableId}`",
+                `"first`": 50,
+                `"sortBy`": `"CREATION_TIME`",
+                `"sortOrder`": `"DESC`",
+                `"snapshotFilter`": [
+                  {
+                    `"field`": `"SNAPSHOT_TYPE`",
+                    `"typeFilters`": []
+                  },
+                  {
+                    `"field`": `"IS_LEGALLY_HELD`",
+                    `"text`": `"false`"
+                  }
+                ],
+                `"timeRange`": {
+                    `"start`": `"${startDate}`",
+                    `"end`": `"${currentDate}`"
+                  }
+              }"
+              $query = "query SnapshotsListSingleQuery(`$snappableId: String!, `$first: Int, `$after: String, `$snapshotFilter: [SnapshotQueryFilterInput!], `$sortBy: SnapshotQuerySortByField, `$sortOrder: SortOrder, `$timeRange: TimeRangeInput) {
+                snapshotsListConnection: snapshotOfASnappableConnection(workloadId: `$snappableId, first: `$first, after: `$after, snapshotFilter: `$snapshotFilter, sortBy: `$sortBy, sortOrder: `$sortOrder, timeRange: `$timeRange) {
+                  edges {
+                    cursor
+                    node {
+                      ...CdmSnapshotLatestUserNotesFragment
+                      id
+                      date
+                      expirationDate
+                      isOnDemandSnapshot
+                      ... on CdmSnapshot {
+                        cdmVersion
+                        isRetentionLocked
+                        isDownloadedSnapshot
+                        cluster {
+                          id
                           name
-                          isExpirationDateCalculated
-                          expirationTime
-                          locationId
+                          version
+                          status
+                          timezone
                         }
-                        localInfo {
-                          name
-                          isExpirationDateCalculated
-                          expirationTime
+                        pendingSnapshotDeletion {
+                          id: snapshotFid
+                          status
                         }
-                        replicationInfos {
-                          name
-                          isExpirationDateCalculated
-                          expirationTime
-                          locationId
-                          isExpirationInformationUnavailable
+                        slaDomain {
+                          ...EffectiveSlaDomainFragment
                         }
-                      }
-                      sapHanaAppMetadata {
-                        backupId
-                        backupPrefix
-                        snapshotType
-                        files {
-                          backupFileSizeInBytes
+                        pendingSla {
+                          ...SLADomainFragment
                         }
-                      }
-                      legalHoldInfo {
-                        shouldHoldInPlace
-                      }
-                    }
-                    ... on PolarisSnapshot {
-                      isDeletedFromSource
-                      isDownloadedSnapshot
-                      isReplica
-                      isArchivalCopy
-                      slaDomain {
-                        name
-                        ... on ClusterSlaDomain {
-                          fid
-                          cluster {
-                            id
+                        snapshotRetentionInfo {
+                          isCustomRetentionApplied
+                          archivalInfos {
                             name
+                            isExpirationDateCalculated
+                            expirationTime
+                            locationId
+                          }
+                          localInfo {
+                            name
+                            isExpirationDateCalculated
+                            expirationTime
+                          }
+                          replicationInfos {
+                            name
+                            isExpirationDateCalculated
+                            expirationTime
+                            locationId
+                            isExpirationInformationUnavailable
                           }
                         }
-                        ... on GlobalSlaReply {
+                        sapHanaAppMetadata {
+                          backupId
+                          backupPrefix
+                          snapshotType
+                          files {
+                            backupFileSizeInBytes
+                          }
+                        }
+                        legalHoldInfo {
+                          shouldHoldInPlace
+                        }
+                      }
+                      ... on PolarisSnapshot {
+                        isDeletedFromSource
+                        isDownloadedSnapshot
+                        isReplica
+                        isArchivalCopy
+                        slaDomain {
+                          name
+                          ... on ClusterSlaDomain {
+                            fid
+                            cluster {
+                              id
+                              name
+                            }
+                          }
+                          ... on GlobalSlaReply {
+                            id
+                          }
+                        }
+                      }
+                    }
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+              }
+              fragment EffectiveSlaDomainFragment on SlaDomain {
+                id
+                name
+                ... on GlobalSlaReply {
+                  isRetentionLockedSla
+                }
+                ... on ClusterSlaDomain {
+                  fid
+                  cluster {
+                    id
+                    name
+                  }
+                  isRetentionLockedSla
+                }
+              }
+              fragment SLADomainFragment on SlaDomain {
+                id
+                name
+                ... on ClusterSlaDomain {
+                  fid
+                  cluster {
+                    id
+                    name
+                  }
+                }
+              }
+              fragment CdmSnapshotLatestUserNotesFragment on CdmSnapshot {
+                latestUserNote {
+                  time
+                  userName
+                  userNote
+                }
+              }"
+              $JSON_BODY = @{
+                "variables" = $variables
+                "query" = $query
+              }
+              $JSON_BODY = $JSON_BODY | ConvertTo-Json
+              $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+              $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
+
+              while ((((($result.content | ConvertFrom-Json).data).snapshotsListConnection).pageInfo).hasNextPage -eq $true) {
+                  $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
+                  Write-Host ("Paging through another 50 snapshots. Looking at End Cursor " + $endCursor)
+                  $variables = "{
+                    `"snappableId`": `"${snappableId}`",
+                    `"first`": 50,
+                    `"sortBy`": `"CREATION_TIME`",
+                    `"sortOrder`": `"DESC`",
+                    `"snapshotFilter`": [
+                      {
+                        `"field`": `"SNAPSHOT_TYPE`",
+                        `"typeFilters`": []
+                      },
+                      {
+                        `"field`": `"IS_LEGALLY_HELD`",
+                        `"text`": `"false`"
+                      }
+                    ],
+                    `"timeRange`": {
+                        `"start`": `"${startDate}`",
+                        `"end`": `"${currentDate}`"
+                      },
+                    `"after`": `"${endCursor}`"
+                  }"
+                  $JSON_BODY = @{
+                    "variables" = $variables
+                    "query" = $query
+                  }
+                  $JSON_BODY = $JSON_BODY | ConvertTo-Json
+                  $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+                  $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
+              }
+          } else {
+              $snappableInfo = @()
+              $query = "query MssqlDatabaseSnapshotCalendarQuery(`$snappableFid: UUID!, `$snapshotGroupBy: CdmSnapshotGroupByEnum!, `$filters: [CdmSnapshotFilter!], `$missedSnapshotGroupBy: MissedSnapshotGroupByTime!, `$timezoneOffset: Float, `$timeRange: TimeRangeInput!) {
+                snappable: mssqlDatabase(fid: `$snappableFid) {
+                  id
+                  missedSnapshotGroupByConnection(groupBy: `$missedSnapshotGroupBy, filter: {timeRange: `$timeRange}, timezoneOffset: `$timezoneOffset) {
+                    nodes {
+                      groupByInfo {
+                        ... on TimeRangeWithUnit {
+                          unit
+                          start
+                          end
+                          __typename
+                        }
+                        __typename
+                      }
+                      missedSnapshotConnection {
+                        count
+                        nodes {
+                          date
+                          __typename
+                        }
+                        __typename
+                      }
+                      __typename
+                    }
+                    __typename
+                  }
+                  cdmGroupedSnapshots(groupBy: `$snapshotGroupBy, CdmSnapshotFilter: `$filters, timezoneOffset: `$timezoneOffset) {
+                    nodes {
+                      groupByInfo {
+                        group
+                        start
+                        end
+                        __typename
+                      }
+                      cdmSnapshots {
+                        count
+                        nodes {
                           id
+                          date
+                          isIndexed
+                          isUnindexable
                         }
                       }
                     }
                   }
                 }
-                pageInfo {
-                  endCursor
-                  hasNextPage
-                }
-              }
-            }
+              }"
+              $timezone = [System.TimeZoneInfo]::Local
+              $offset = $timezone.BaseUtcOffset
+              $hoursOffset = $offset.Hours
 
-            fragment EffectiveSlaDomainFragment on SlaDomain {
-              id
-              name
-              ... on GlobalSlaReply {
-                isRetentionLockedSla
+              if ($timezone.SupportsDaylightSavingTime -and $timezone.IsDaylightSavingTime([System.DateTime]::Now)) {
+                  $hoursOffset++
               }
-              ... on ClusterSlaDomain {
-                fid
-                cluster {
-                  id
-                  name
-                }
-                isRetentionLockedSla
-              }
-            }
 
-            fragment SLADomainFragment on SlaDomain {
-              id
-              name
-              ... on ClusterSlaDomain {
-                fid
-                cluster {
-                  id
-                  name
-                }
-              }
-            }
+              $offsetString = if ($hoursOffset -ge 0) { "+$hoursOffset" } else { "$hoursOffset" }
 
-            fragment CdmSnapshotLatestUserNotesFragment on CdmSnapshot {
-              latestUserNote {
-                time
-                userName
-                userNote
-              }
-            }"
-            $JSON_BODY = @{
-              "variables" = $variables
-              "query" = $query
-          }
-          $JSON_BODY = $JSON_BODY | ConvertTo-Json
-          $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-          $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node
-
-          while ((((($result.content | ConvertFrom-Json).data).snapshotsListConnection).pageInfo).hasNextPage -eq $true){
-              $endCursor = ((((($result.content) | ConvertFrom-Json).data).taskDetailConnection).pageinfo).endCursor
-              Write-Host ("Paging through another 50 snapshots. Looking at End Cursor " + $endCursor)
               $variables = "{
-                  `"snappableId`": `"${snappableId}`",
-                  `"first`": 50,
-                  `"sortBy`": `"CREATION_TIME`",
-                  `"sortOrder`": `"DESC`",
-                  `"snapshotFilter`": [
-                    {
-                      `"field`": `"SNAPSHOT_TYPE`",
-                      `"typeFilters`": []
-                    },
-                    {
-                      `"field`": `"IS_LEGALLY_HELD`",
-                      `"text`": `"false`"
-                    }
-                  ],
-                  `"timeRange`": {
-                      `"start`": `"${startDate}`",
-                      `"end`": `"${currentDate}`"
-                    },
-                  `"after`": `"${endCursor}`"
-                }"
+                `"snappableFid`": `"${snappableId}`",
+                `"snapshotGroupBy`": `"Day`",
+                `"missedSnapshotGroupBy`": `"DAY`",
+                `"timeRange`": {
+                  `"start`": `"${startDate}`",
+                  `"end`": `"${currentDate}`"
+                },
+                `"timezoneOffset`": $offsetString,
+                `"filters`": [
+                  {
+                    `"field`": `"TIME_RANGE`",
+                    `"texts`": [
+                      `"${startDate}`",
+                      `"${currentDate}`"
+                    ]
+                  },
+                  {
+                    `"field`": `"IS_EXPIRED`",
+                    `"texts`": [
+                      `"false`"
+                    ]
+                  }
+                ]
+              }"
               $JSON_BODY = @{
-                  "variables" = $variables
-                  "query" = $query
+                "variables" = $variables
+                "query" = $query
               }
               $JSON_BODY = $JSON_BODY | ConvertTo-Json
               $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-              $snappableInfo += (((($result.content | ConvertFrom-Json).data).snapshotsListConnection).edges).node 
+              $result = (((((($result.content | ConvertFrom-Json).data).snappable).cdmGroupedSnapshots).nodes).cdmSnapshots).nodes
+              $snappableInfo += $result
           }
-
       }
-
-      Catch{
+      Catch {
           Write-Error("Error $($_)")
       }
   }
-  End{
+  End {
       Write-Output $snappableInfo
   }
-
 }
+
 Function Get-DateRange{ 
   #Function taken from https://thesurlyadmin.com/2014/07/25/quick-script-date-ranges/  
   [CmdletBinding()]
