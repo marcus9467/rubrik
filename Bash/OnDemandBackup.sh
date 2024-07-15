@@ -51,7 +51,7 @@ echo $SHELL
 echo $LAUNCHTIME
 
 # Prepare the JSON payload for the on-demand backup
-JSON='{"slaId": "'$SLAID'"}'
+JSON="{\"slaId\": \"$SLAID\"}"
 
 # Check for any currently running backups
 response=$(curl -k -X GET "https://$RUBRIK/api/v1/event/latest?event_status=Running&event_type=Backup&object_ids=$FILESETID" \
