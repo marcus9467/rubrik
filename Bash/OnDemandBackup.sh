@@ -1,4 +1,5 @@
 #!/bin/bash
+# Set this to /opt/freeware/bin/bash on AIX hosts as this is the typical location if bash is present. 
 # Requires 'curl'
 # Date: 2024/07/08
 
