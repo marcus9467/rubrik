@@ -316,27 +316,36 @@ $CloudCapacityUsage = Get-CloudNativeCapacity
 $chargebackInfo = @()
 #$AssetCount = ($masterTagsList | Measure-Object).count
 #$index = 1
-ForEach ($id in $masterTagsList){
-    $VMCapacityInfo = $CloudCapacityUsage | Where-Object {$_.id -eq $id.id}
-    ForEach($tag in $id.tags){
-        Write-Host ("Collecting information on Object " + $id.name)
-        $CloudSummaryInfo = New-Object PSobject
-        $CloudSummaryInfo | Add-Member -NotePropertyName "TagValue" -NotePropertyValue $tag.value
-        $CloudSummaryInfo | Add-Member -NotePropertyName "TagKey" -NotePropertyValue $tag.key
-        $CloudSummaryInfo | Add-Member -NotePropertyName "ObjectID" -NotePropertyValue $id.id
-        $CloudSummaryInfo | Add-Member -NotePropertyName "VM_Name" -NotePropertyValue $id.name
-        $CloudSummaryInfo | Add-Member -NotePropertyName "slaDomain" -NotePropertyValue $VMCapacityInfo.slaDomain.name
-        $CloudSummaryInfo | Add-Member -NotePropertyName "protectionStatus" -NotePropertyValue $VMCapacityInfo.protectionStatus
-        $CloudSummaryInfo | Add-Member -NotePropertyName "objectType" -NotePropertyValue $id.objectType
-        $CloudSummaryInfo | Add-Member -NotePropertyName "usedBytes" -NotePropertyValue $VMCapacityInfo.usedBytes
-        $CloudSummaryInfo | Add-Member -NotePropertyName "PhysicalBytes" -NotePropertyValue $VMCapacityInfo.physicalBytes
-        $CloudSummaryInfo | Add-Member -NotePropertyName "provisionedBytes" -NotePropertyValue $VMCapacityInfo.provisionedBytes
-        $CloudSummaryInfo | Add-Member -NotePropertyName "ReplicaBytes" -NotePropertyValue $VMCapacityInfo.replicaStorage
-        $CloudSummaryInfo | Add-Member -NotePropertyName "ArchiveBytes" -NotePropertyValue $VMCapacityInfo.archiveStorage
-        $chargebackInfo += $CloudSummaryInfo
-        #$index++
-    }
+ForEach($VM in $CloudCapacityUsage){
+  Write-Host ("Collecting information on Object " + $VM.name)
+  $tagInfo = $masterTagsList |Where-Object {$_.id -eq $VM.id}
+  ForEach($tag in $tagInfo.tags){
+    $CloudSummaryInfo = New-Object PSobject
+
+    $ArchiveStorageString = $VM.archiveStorage -join ","
+    $ReplicationStorageString= $VM.ReplicaBytes -join ","
+    $ProvisionedStorageString = $VM.provisionedBytes -join ","
+    $PhysicalStorageString = $VM.physicalBytes -join ","
+    $UsedBytesString = $VM.usedBytes -join ","
+    $ProtectionStatusString = $VM.protectionStatus -join ","
+    $SlaString= $VM.slaDomain.name -join ","
+
+    $CloudSummaryInfo | Add-Member -NotePropertyName "TagValue" -NotePropertyValue $tag.value
+    $CloudSummaryInfo | Add-Member -NotePropertyName "TagKey" -NotePropertyValue $tag.key
+    $CloudSummaryInfo | Add-Member -NotePropertyName "ObjectID" -NotePropertyValue $VM.id
+    $CloudSummaryInfo | Add-Member -NotePropertyName "VM_Name" -NotePropertyValue $VM.name
+    $CloudSummaryInfo | Add-Member -NotePropertyName "slaDomain" -NotePropertyValue $SlaString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "protectionStatus" -NotePropertyValue $ProtectionStatusString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "objectType" -NotePropertyValue $VM.objectType
+    $CloudSummaryInfo | Add-Member -NotePropertyName "usedBytes" -NotePropertyValue $UsedBytesString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "PhysicalBytes" -NotePropertyValue $PhysicalStorageString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "provisionedBytes" -NotePropertyValue $ProvisionedStorageString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "ReplicaBytes" -NotePropertyValue $ReplicationStorageString
+    $CloudSummaryInfo | Add-Member -NotePropertyName "ArchiveBytes" -NotePropertyValue $ArchiveStorageString
+    $chargebackInfo += $CloudSummaryInfo
+  }
 }
+
 if($tagmatch){
   $chargebackInfo = $chargebackInfo | Where-Object {$_.TagKey -match $tagmatch}
 }
