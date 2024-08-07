@@ -3,19 +3,19 @@
 This script will extract compliance and snapshot information for all CDM clusters in a given RSC environment. Filters are available for both clusters and slas. 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report.
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -ClusterId "3bc43be7-00ca-4ed8-ba13-cef249d337fa,39b92c18-d897-4b55-a7f9-17ff178616d0"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the clusterUUIDs specified 
 
 
 .EXAMPLE
-./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -daysToReport PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
+./BackupComplianceRangeReport.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -ReportRange PAST_7_DAYS -SlaIds "71ede730-34a2-53e0-a0f2-829d9a0b4b30"
 
 This will generate a list of objects and their compliance status over the last 7 days. In the event there are missed snapshots, snapshot information relative to the date range specified will be pulled and complied into a single report. This will also filter to only the SLAIDs specified. The SLAIDs can either be the local CDM IDs, or the global RSC FIDs
 
