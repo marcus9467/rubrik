@@ -49,10 +49,10 @@ $headers = @{ Authorization = "Bearer "+ $token }
 
 
 #Open Volume for writes
-(Invoke-WebRequest -Uri ("https://" + $rubrikAddress + "/api/internal/managed_volume/" + $MV_ID + "/begin_snapshot") -Method POST -Headers $headers)
+(Invoke-WebRequest -Uri ("https://" + $rubrikAddress + "/api/v1/managed_volume/" + $MV_ID + "/begin_snapshot") -Method POST -Headers $headers)
 
 #Insert code to write to volume here
 
 
 #Close Volume for Writes
-(Invoke-WebRequest -Uri ("https://" + $rubrikAddress + "/api/internal/managed_volume/" + $MV_ID + "/end_snapshot") -Method POST -Headers $headers)
+(Invoke-WebRequest -Uri ("https://" + $rubrikAddress + "/api/v1/managed_volume/" + $MV_ID + "/end_snapshot") -Method POST -Headers $headers)
