@@ -20,7 +20,6 @@ function TakeMssqlLogBackup{
       $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
       $APIResult = (($result.content | ConvertFrom-Json).data).takeMssqlLogBackup
       Write-Host ("Starting MSSQL Log Job " + $APIResult)
-
     }
     catch{
       Write-Error("Error $($_)")
