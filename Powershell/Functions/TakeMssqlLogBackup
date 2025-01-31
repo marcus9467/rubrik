@@ -1,0 +1,29 @@
+function TakeMssqlLogBackup{
+  [CmdletBinding()]
+  param (
+      [parameter(Mandatory=$true)]
+      [string[]]$snappableId
+  )
+  process{
+    try{
+      $query = "mutation TakeMssqlLogBackupMutation(`$input: TakeMssqlLogBackupInput!) {takeMssqlLogBackup(input: `$input) {id}}"
+      $variables = @{
+        input = @{
+            id = $snappableId
+        }
+      }
+      $JSON_BODY = @{
+        "variables" = $variables
+        "query" = $query
+      }
+      $JSON_BODY = $JSON_BODY | ConvertTo-Json
+      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+      $APIResult = (($result.content | ConvertFrom-Json).data).takeMssqlLogBackup
+      Write-Host ("Starting MSSQL Log Job " + $APIResult)
+
+    }
+    catch{
+      Write-Error("Error $($_)")
+    }
+  }
+}
