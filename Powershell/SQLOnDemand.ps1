@@ -24,7 +24,9 @@ param (
     [parameter(Mandatory=$true)]
     [string]$DatabaseId1,
     [parameter(Mandatory=$true)]
-    [string]$DatabaseId2
+    [string]$DatabaseId2,
+    [parameter(Mandatory=$false)]
+    [switch]$logBackup
 )
 
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
@@ -148,7 +150,6 @@ function disconnect-polaris {
         }
 
 }
-
 function Start-MSSQLBackup{
     [CmdletBinding()]
     param (
@@ -195,6 +196,34 @@ function Start-MSSQLBackup{
         Write-Host ("Backup Successfully initiated. Please see " + (((($result.Content | convertFrom-Json).data).createOnDemandMssqlBackup).links).href + " for progress information.")
     }
 }
+function TakeMssqlLogBackup{
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string[]]$snappableId
+    )
+    process{
+      try{
+        $query = "mutation TakeMssqlLogBackupMutation(`$input: TakeMssqlLogBackupInput!) {takeMssqlLogBackup(input: `$input) {id}}"
+        $variables = @{
+          input = @{
+              id = $snappableId
+          }
+        }
+        $JSON_BODY = @{
+          "variables" = $variables
+          "query" = $query
+        }
+        $JSON_BODY = $JSON_BODY | ConvertTo-Json
+        $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+        $APIResult = (($result.content | ConvertFrom-Json).data).takeMssqlLogBackup
+        Write-Host ("Starting MSSQL Log Job " + $APIResult)
+      }
+      catch{
+        Write-Error("Error $($_)")
+      }
+    }
+  }
 
 $polSession = connect-polaris
 $rubtok = $polSession.access_token
@@ -206,7 +235,11 @@ $headers = @{
 $Polaris_URL = ($serviceAccountObj.access_token_uri).replace("client_token", "graphql")
 $logoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "session")
 
-
+if($logBackup){
+    TakeMssqlLogBackup -snappableId $DatabaseId1, $DatabaseId2
+    disconnect-polaris
+    Exit 0
+}
 <#
 Database Unload Process Here
 
