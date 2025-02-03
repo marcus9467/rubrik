@@ -8,6 +8,11 @@ This script will trigger an ondemand backup right after the dataloader process i
 
 This will initate an ondemand backup after the dataloader process. 
 
+.EXAMPLE
+./SQLOnDemand.ps1 -ServiceAccountJson /Users/Rubrik/Documents/ServiceAccount.json -DatabaseId1 "9a818023-9f9b-5a91-9228-2ccf18e85926" -DatabaseId2 "210289af-5158-55e9-b23f-4de7727c8995" -logBackup
+
+This will initate an ondemand log backup for the identified databases.
+
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
     Created : November 13, 2023
