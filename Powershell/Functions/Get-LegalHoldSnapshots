@@ -1,6 +1,4 @@
 function Get-LegalHoldSnapshots {
-  <#
-  #>
   [CmdletBinding()]
   param (
       [parameter(Mandatory=$true)]
@@ -9,53 +7,54 @@ function Get-LegalHoldSnapshots {
   process {
     try{
       $query = "query SnapshotManagementLegalHoldObjectsQuery(`$input: SnappablesWithLegalHoldSnapshotsInput!, `$first: Int, `$after: String, `$last: Int, `$before: String) {
-  snappablesWithLegalHoldSnapshotsSummary(input: `$input, first: `$first, after: `$after, last: `$last, before: `$before) {
-    edges {
-      cursor
-      node {
-        name
-        id
-        snappableType
-        snapshotCount
-        physicalLocation {
-          name
-          managedId
+        snappablesWithLegalHoldSnapshotsSummary(input: `$input, first: `$first, after: `$after, last: `$last, before: `$before) {
+          edges {
+            cursor
+            node {
+              name
+              id
+              snappableType
+              snapshotCount
+              physicalLocation {
+                name
+                managedId
+                __typename
+              }
+              __typename
+            }
+            __typename
+          }
+          pageInfo {
+            endCursor
+            hasPreviousPage
+            hasNextPage
+            __typename
+          }
           __typename
         }
-        __typename
-      }
-      __typename
+      }"
+            $variables = "{
+        `"input`": {
+          `"sortParam`": {
+            `"sortOrder`": `"ASC`",
+            `"type`": `"SNAPPABLE_NAME`"
+          },
+          `"filterParams`": [],
+          `"clusterUuid`": `"${clusterId}`"
+        },
+        `"first`": 50
+      }"
+            $JSON_BODY = @{
+              "variables" = $variables
+              "query" = $query
+            }
+            $JSON_BODY = $JSON_BODY | ConvertTo-Json
+            $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+            $result = (((($result.Content | ConvertFrom-Json).data).snappablesWithLegalHoldSnapshotsSummary).edges).node
+            #while((((($result.Content | ConvertFrom-Json).data).snappablesWithLegalHoldSnapshotsSummary).pageInfo).hasNextPage){}
+            $result
     }
-    pageInfo {
-      endCursor
-      hasPreviousPage
-      hasNextPage
-      __typename
-    }
-    __typename
-  }
-}"
-      $variables = "{
-  `"input`": {
-    `"sortParam`": {
-      `"sortOrder`": `"ASC`",
-      `"type`": `"SNAPPABLE_NAME`"
-    },
-    `"filterParams`": [],
-    `"clusterUuid`": `"${clusterId}`"
-  },
-  `"first`": 50
-}"
-      $JSON_BODY = @{
-        "variables" = $variables
-        "query" = $query
-      }
-      $JSON_BODY = $JSON_BODY | ConvertTo-Json
-      $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
-      $result = (((($result.Content | ConvertFrom-Json).data).snappablesWithLegalHoldSnapshotsSummary).edges).node
-      #while((((($result.Content | ConvertFrom-Json).data).snappablesWithLegalHoldSnapshotsSummary).pageInfo).hasNextPage){
-      }
-      $result
+
     catch{
       Write-Error("Error $($_)")
     }
