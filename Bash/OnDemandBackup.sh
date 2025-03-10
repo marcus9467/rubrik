@@ -35,18 +35,33 @@ if [ -z "$SECRET" ] || [ -z "$USERID" ] || [ -z "$RUBRIK" ] || [ -z "$FILESETID"
     exit 1
 fi
 
-# Service Account Configuration Session Setup
-auth_response=$(curl -k --location "https://$RUBRIK/api/v1/service_account/session" \
-  --header 'Content-Type: application/json' \
-  --data "{\"serviceAccountId\": \"$USERID\", \"secret\": \"$SECRET\"}")
+# Function to authenticate and get the token
+authenticate() {
+    auth_response=$(curl -k --silent --location "https://$RUBRIK/api/v1/service_account/session" \
+      --header 'Content-Type: application/json' \
+      --data "{\"serviceAccountId\": \"$USERID\", \"secret\": \"$SECRET\"}")
 
-# Extract the token from the response
-TOKEN=$(echo "$auth_response" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-if [ -z "$TOKEN" ]; then
-    echo "Error: Failed to retrieve the authentication token."
-    exit 1
-fi
-AUTH_HEADER="Authorization: Bearer $TOKEN"
+    TOKEN=$(echo "$auth_response" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    if [ -z "$TOKEN" ]; then
+        echo "Error: Failed to retrieve the authentication token."
+        exit 1
+    fi
+    AUTH_HEADER="Authorization: Bearer $TOKEN"
+    AUTH_TIME=$(date +%s)
+}
+
+# Initial authentication
+authenticate
+
+# Renew the token if it is older than 3 hours
+renew_token_if_needed() {
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - AUTH_TIME))
+    if [ $elapsed_time -ge 10800 ]; then # 10800 seconds = 3 hours
+        echo "Token expired, re-authenticating..."
+        authenticate
+    fi
+}
 
 echo $SHELL
 echo $LAUNCHTIME
@@ -55,7 +70,8 @@ echo $LAUNCHTIME
 JSON="{\"slaId\": \"$SLAID\"}"
 
 # Check for any currently running backups
-response=$(curl -k -X GET "https://$RUBRIK/api/v1/event/latest?event_status=Running&event_type=Backup&object_ids=$FILESETID" \
+renew_token_if_needed
+response=$(curl -k -s -X GET "https://$RUBRIK/api/v1/event/latest?event_status=Running&event_type=Backup&object_ids=$FILESETID" \
   -H "accept: application/json" -H "$AUTH_HEADER")
 
 # Check if the response contains an event with status "Running"
@@ -64,8 +80,9 @@ if echo "$response" | grep -q '"eventStatus":"Running"'; then
     exit 0
 else
     # Trigger on-demand backup using curl
+    renew_token_if_needed
     RESULT=$(curl -H "$AUTH_HEADER" -X POST -H 'Content-Type: application/json' -d "$JSON" \
-      "https://$RUBRIK/api/v1/fileset/$FILESETID/snapshot" -k -1 -s)
+      "https://$RUBRIK/api/v1/fileset/$FILESETID/snapshot" -k -s)
 
     # Check if the result contains the href field
     HREF=$(echo $RESULT | sed -n 's/.*"href":"\([^"]*\)".*/\1/p')
@@ -83,7 +100,8 @@ else
 
         while [ $RUBRIKSTATUS -eq 0 ]; do
             # Query the URL for the current status of the on-demand backup
-            STATUS=$(curl -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' "$HREF" -k -1 -s)
+            renew_token_if_needed
+            STATUS=$(curl -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' "$HREF" -k -s)
 
             # Check if any of the end states are found, if so, $RUBRIKSTATUS changes and loop exits
             RUBRIKSTATUS=$(echo $STATUS | grep -E 'SUCCEED|SUCCESS|SUCCESSWITHWARNINGS|FAIL|CANCEL' | wc -l)
