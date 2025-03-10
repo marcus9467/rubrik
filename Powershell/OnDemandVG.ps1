@@ -8,7 +8,7 @@ CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 .Example
 ./OndemandVG.ps1 -rubrikAddress "10.8.48.104" -ServiceAccountJson $serviceAccountJson -VG_ID "VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c"
 
-This initiates a snapshot for VG VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c. 
+This initiates a snapshot for VG VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c.
 
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com>
@@ -41,22 +41,21 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
         return true;
     }
 }
-"@}
+"@
 
-catch 
-    {
+}
+catch {
     Write-Output "Trust cert policy already set"
-    }
+}
 
-    #Bypass self-signed certificate check issue
+#Bypass self-signed certificate check issue
 $AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12'
 [System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols
 [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
 
 #>
 
-
-function Connect-RubrikCdm{
+function Connect-RubrikCdm {
     [CmdletBinding()]
     param (
         [parameter(Mandatory=$true)]
@@ -64,31 +63,41 @@ function Connect-RubrikCdm{
         [parameter(Mandatory=$true)]
         [string]$serviceAccountJson
     )
-    try{
+    try {
         $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
-          $connectionData = [ordered]@{
-              'serviceAccountId' = $serviceAccountObj.client_id
-              'secret' = $serviceAccountObj.client_secret
-          } | ConvertTo-Json
-          $uriString = "https://$($rubrikAddress)/api/v1/service_account/session"
-  
-      $rubrikCdm = Invoke-RestMethod -Method Post -uri $uriString -ContentType application/json -body $connectionData -SkipCertificateCheck
+        $connectionData = [ordered]@{
+            'serviceAccountId' = $serviceAccountObj.client_id
+            'secret' = $serviceAccountObj.client_secret
+        } | ConvertTo-Json
+        $uriString = "https://$($rubrikAddress)/api/v1/service_account/session"
+
+        $rubrikCdm = Invoke-RestMethod -Method Post -uri $uriString -ContentType application/json -body $connectionData -SkipCertificateCheck
+        $global:connectionInfo = $rubrikCdm
+        $global:authTime = Get-Date
     }
-    catch{
-      Write-Error("Error $($_)")
+    catch {
+        Write-Error("Error $($_)")
     }
-    finally{
-      Write-Output $rubrikCdm
+    finally {
+        Write-Output $rubrikCdm
     }
-  }
+}
+
+function New-RubrikHeader {
+    # Refresh the token if it is older than 3 hours
+    if ((Get-Date) - $global:authTime).TotalHours -ge 3 {
+        Write-Output "Token expired, re-authenticating..."
+        $global:connectionInfo = Connect-RubrikCdm -rubrikAddress $rubrikAddress -serviceAccountJson $ServiceAccountJson
+    }
+    $token = $global:connectionInfo.token
+    return @{ Authorization = "Bearer $token" }
+}
 
 $connectionInfo = Connect-RubrikCdm -rubrikAddress $rubrikAddress -serviceAccountJson $ServiceAccountJson
-$token = $connectionInfo.token
-#Setup Auth context in headers
-#Using basic auth just for ease, but in production this should be converted to something more secure. 
-$headers = @{ Authorization = "Bearer "+ $token }
+$authTime = Get-Date
 
-
+# Setup Auth context in headers
+$headers = New-RubrikHeader
 
 # Take VG Backup
 $request = (Invoke-WebRequest -SkipCertificateCheck -Uri ("https://" + $rubrikAddress + "/api/v1/volume_group/" + $VG_ID + "/snapshot") -Method POST -Headers $headers)
@@ -100,6 +109,7 @@ $endStatuses = "SUCCEEDED", "SUCCESSWITHWARNINGS", "FAILED", "CANCELED"
 $status = ""
 
 while ($endStatuses -notcontains $status) {
+    $headers = New-RubrikHeader
     $hrefRequest = (Invoke-WebRequest -SkipCertificateCheck -Uri $href -Method GET -Headers $headers)
     $status = ($hrefRequest.Content | ConvertFrom-Json).status
     Write-Output "Current status: $status"
