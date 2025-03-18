@@ -1,4 +1,4 @@
-function disconnect-polaris {
+function disconnect-RSC {
 .SYNOPSIS
     Function to disconnect the previously established session. 
     
