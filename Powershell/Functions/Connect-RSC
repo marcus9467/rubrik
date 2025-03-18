@@ -1,4 +1,4 @@
-function connect-polaris {
+function connect-RSC {
     <#
     .SYNOPSIS
     Function to provide the initial authorization to Rubrik Security Cloud using a service account JSON file. 
