@@ -6,20 +6,27 @@ initiate on-demand snapshots for multiple GCP VMs, and then disconnect from the 
 a feature to monitor the status of these backup jobs until completion, reporting snapshot creation times
 and the delta between them.
 
+Additionally, it now supports an optional flag to list all discoverable GCP VM IDs and their names.
+
 It leverages Python's 'requests' library for API communication and 'argparse' for command-line argument parsing.
 
-Usage:
+Usage for On-Demand Snapshot:
     python3 your_script_name.py --VMIDs "vm_id_1,vm_id_2,..." --slaId "your_sla_id" --serviceAccountJson "path/to/your/serviceAccount.json"
 
+Usage for Listing GCP VM IDs:
+    python3 your_script_name.py --listVMIDs --serviceAccountJson "path/to/your/serviceAccount.json"
+
 Arguments:
-    --VMIDs (str, required): A comma-separated list of UUIDs for the GCP VMs you want to back up.
-                             Example: "37771f07-a608-47e5-a2eb-061289ab456b,36e3ae95-0b48-454d-be9b-c8569f63b62c"
-    --slaId (str, required): The UUID of the SLA Domain to use for retention of the on-demand snapshot.
-                             Example: "00000000-0000-0000-0000-000000000002" (often a 'Do not retain' SLA)
+    --VMIDs (str, required for snapshot): A comma-separated list of UUIDs for the GCP VMs you want to back up.
+                                         Example: "37771f07-a608-47e5-a2eb-061289ab456b,36e3ae95-0b48-454d-be9b-c8569f63b62c"
+    --slaId (str, required for snapshot): The UUID of the SLA Domain to use for retention of the on-demand snapshot.
+                                          Example: "00000000-0000-0000-0000-000000000002" (often a 'Do not retain' SLA)
     --serviceAccountJson (str, required): The file path to your Rubrik Security Cloud service account JSON file.
                                           This file contains your client_id, client_secret, and access_token_uri.
     --pollInterval (int, optional): Interval in seconds for polling backup status (default: 15).
     --timeout (int, optional): Maximum time in minutes to wait for monitoring backup status (default: 60).
+    --listVMIDs (flag, optional): If present, the script will list all GCP VM IDs and their names and then exit.
+                                  When this flag is used, --VMIDs and --slaId are not required.
 
 Example Service Account JSON Structure:
 {
@@ -33,7 +40,8 @@ Error Handling:
 The script includes robust error handling for file not found, invalid JSON, connection failures,
 and API response issues.
 
-Author: Marcus Henderson
+Author: Marcus Henderson (original PowerShell concept)
+Python Conversion & Enhancements: Gemini AI
 """
 
 import json
@@ -41,6 +49,7 @@ import requests
 import os
 import argparse
 import time
+import sys # Import sys for exiting the script
 from datetime import datetime, timedelta, timezone
 
 class RSCSession:
@@ -151,7 +160,7 @@ class RSCSession:
                 # Optionally print response content for debugging
                 # print(f"Response content: {response.text}")
         except requests.exceptions.RequestException as e:
-            print(f"Failed to logout due2 to a request error: {e}")
+            print(f"Failed to logout due to a request error: {e}")
         except Exception as e:
             print(f"An unexpected error occurred during logout: {e}")
 
@@ -221,7 +230,6 @@ mutation TakeOnDemandSnapshotMutation($retentionSlaId: String!, $snappableIds: [
             raise ConnectionError("Not connected to RSC. Please call connect_rsc first.")
 
         # Define terminal states for backup activities
-        # The loop will continue until all VMs reach any of these states.
         TERMINAL_STATES = {"Failed", "Succeeded", "SucceededWithWarnings", "Success", "Canceled"}
         SNAPSHOT_CREATED_MESSAGE_PART = "Successfully created on-demand snapshot"
 
@@ -279,7 +287,8 @@ mutation TakeOnDemandSnapshotMutation($retentionSlaId: String!, $snappableIds: [
                     "first": 50 # Fetch up to 50 events per poll
                 },
                 "query": """
-query EventSeriesListQuery($after: String, $filters: ActivitySeriesFilter, $first: Int, $sortBy: ActivitySeriesSortField, $sortOrder: SortOrder) {
+query EventSeriesListQuery($after: String, $filters: ActivitySeriesFilter, $first: Int, $sortBy: ActivitySeriesSortField,
+                           $sortOrder: SortOrder) {
   activitySeriesConnection(
     after: $after
     first: $first
@@ -436,6 +445,224 @@ fragment EventSeriesFragment on ActivitySeries {
 
         return vm_statuses
 
+    def list_gcp_vms(self):
+        """
+        Fetches and prints a list of all GCP VM IDs and their native names.
+        """
+        if not self.polaris_url or not self.headers:
+            raise ConnectionError("Not connected to RSC. Please call connect_rsc first.")
+
+        print("\n--- Fetching GCP VM IDs and Names ---")
+        all_vms = []
+        has_next_page = True
+        after_cursor = None
+
+        while has_next_page:
+            graphql_payload = {
+                "operationName": "GCPInstancesListQuery",
+                "variables": {
+                    "first": 50, # Fetch 50 VMs per request
+                    "after": after_cursor,
+                    "sortBy": "GCP_INSTANCE_NATIVE_NAME",
+                    "sortOrder": "ASC",
+                    "filters": {
+                        "effectiveSlaFilter": None,
+                        "nameOrIdSubstringFilter": None,
+                        "relicFilter": {"relic": False},
+                        "regionFilter": None,
+                        "networkFilter": None,
+                        "labelFilter": None,
+                        "projectFilter": None,
+                        "machineTypeFilter": None,
+                        "orgFilter": None,
+                        "fileIndexingFilter": None
+                    },
+                    "isMultitenancyEnabled": True,
+                    "includeRscNativeObjectPendingSla": True
+                },
+                "query": """
+query GCPInstancesListQuery($first: Int, $after: String, $sortBy: GcpNativeGceInstanceSortFields, $sortOrder: SortOrder, $filters: GcpNativeGceInstanceFilters, $isMultitenancyEnabled: Boolean = false, $includeRscNativeObjectPendingSla: Boolean!) {
+  gcpNativeGceInstances(first: $first, after: $after, sortBy: $sortBy, sortOrder: $sortOrder, gceInstanceFilters: $filters) {
+    edges {
+      cursor
+      node {
+        id
+        nativeId
+        nativeName
+        vpcName
+        networkHostProjectNativeId
+        region
+        zone
+        isRelic
+        machineType
+        ...EffectiveSlaColumnFragment
+        effectiveSlaDomain {
+          ... on GlobalSlaReply {
+            archivalSpecs {
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        ...OrganizationsColumnFragment @include(if: $isMultitenancyEnabled)
+        gcpNativeProject {
+          id
+          name
+          nativeId
+          status
+          __typename
+        }
+        authorizedOperations
+        fileIndexingStatus
+        ...GcpSlaAssignmentColumnFragment
+        fileIndexingStatus
+        __typename
+      }
+      __typename
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+      hasPreviousPage
+      __typename
+    }
+    __typename
+  }
+}
+
+fragment OrganizationsColumnFragment on HierarchyObject {
+  allOrgs {
+    fullName
+    __typename
+  }
+  __typename
+}
+
+fragment EffectiveSlaColumnFragment on HierarchyObject {
+  id
+  effectiveSlaDomain {
+    ...EffectiveSlaDomainFragment
+    ... on GlobalSlaReply {
+      description
+      __typename
+    }
+    __typename
+  }
+  ... on CdmHierarchyObject {
+    pendingSla {
+      ...SLADomainFragment
+      __typename
+    }
+    __typename
+  }
+  ... on PolarisHierarchyObject {
+    rscNativeObjectPendingSla @include(if: $includeRscNativeObjectPendingSla) {
+      ...CompactSLADomainFragment
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment EffectiveSlaDomainFragment on SlaDomain {
+  id
+  name
+  ... on GlobalSlaReply {
+    isRetentionLockedSla
+    retentionLockMode
+    __typename
+  }
+  ... on ClusterSlaDomain {
+    fid
+    cluster {
+      id
+      name
+      __typename
+    }
+    isRetentionLockedSla
+    retentionLockMode
+    __typename
+  }
+  __typename
+}
+
+fragment SLADomainFragment on SlaDomain {
+  id
+  name
+  ... on ClusterSlaDomain {
+    fid
+    cluster {
+      id
+      name
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment CompactSLADomainFragment on CompactSlaDomain {
+  id
+  name
+  __typename
+}
+
+fragment GcpSlaAssignmentColumnFragment on HierarchyObject {
+  effectiveSlaSourceObject {
+    fid
+    name
+    objectType
+    __typename
+  }
+  slaAssignment
+  __typename
+}
+"""
+            }
+
+            try:
+                response = requests.post(self.polaris_url, headers=self.headers, json=graphql_payload)
+                response.raise_for_status()
+                response_data = response.json()
+
+                if response_data and 'data' in response_data and 'gcpNativeGceInstances' in response_data['data']:
+                    connection = response_data['data']['gcpNativeGceInstances']
+                    edges = connection.get('edges', [])
+                    for edge in edges:
+                        node = edge.get('node')
+                        if node:
+                            vm_id = node.get('id')
+                            vm_name = node.get('nativeName')
+                            if vm_id and vm_name:
+                                all_vms.append({"id": vm_id, "name": vm_name})
+
+                    page_info = connection.get('pageInfo', {})
+                    has_next_page = page_info.get('hasNextPage', False)
+                    after_cursor = page_info.get('endCursor')
+                else:
+                    print("No GCP instances found or unexpected API response structure.")
+                    has_next_page = False # Stop polling if response is malformed
+
+            except requests.exceptions.RequestException as e:
+                print(f"Error fetching GCP VM list: {e}")
+                has_next_page = False # Stop polling on error
+            except json.JSONDecodeError:
+                print("Error parsing JSON response while listing GCP VMs.")
+                has_next_page = False # Stop polling on error
+            except Exception as e:
+                print(f"An unexpected error occurred while listing GCP VMs: {e}")
+                has_next_page = False # Stop polling on error
+
+        if all_vms:
+            print("\n--- Discovered GCP VM IDs and Names ---")
+            for vm in all_vms:
+                print(f"VM Name: {vm['name']} | VM ID: {vm['id']}")
+            print(f"\nTotal Discovered VMs: {len(all_vms)}")
+        else:
+            print("\nNo GCP VMs found.")
+
 
 # Example Usage:
 if __name__ == "__main__":
@@ -444,13 +671,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--VMIDs",
         type=str,
-        required=True,
+        required=False, # Not required if --listVMIDs is used
         help="Comma-separated list of VM IDs (UUIDs) to be backed up."
     )
     parser.add_argument(
         "--slaId",
         type=str,
-        required=True,
+        required=False, # Not required if --listVMIDs is used
         help="The SLA ID (UUID) to use for retention of the on-demand snapshot."
     )
     parser.add_argument(
@@ -462,7 +689,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pollInterval",
         type=int,
-        default=15, # Changed default to 15 seconds
+        default=15,
         help="Interval in seconds for polling backup status (default: 15)."
     )
     parser.add_argument(
@@ -471,26 +698,38 @@ if __name__ == "__main__":
         default=60,
         help="Timeout in minutes for monitoring backup status (default: 60)."
     )
-
+    parser.add_argument(
+        "--listVMIDs",
+        action='store_true', # This makes it a boolean flag
+        help="List all GCP VM IDs and their names and exit."
+    )
 
     args = parser.parse_args()
 
-    # Split the comma-separated VM IDs string into a list
-    vm_ids_to_backup = [vm_id.strip() for vm_id in args.VMIDs.split(',') if vm_id.strip()]
-    sla_id_for_retention = args.slaId
-    service_account_json_path = args.serviceAccountJson
-    poll_interval = args.pollInterval
-    timeout = args.timeout
-
     rsc_session = RSCSession()
     try:
-        # 1. Connect to RSC
+        # Connect to RSC first, as it's needed for both listing and snapshot operations
         print("\n--- Attempting to connect to RSC ---")
-        polaris_session_data = rsc_session.connect_rsc(service_account_json_path)
+        rsc_session.connect_rsc(args.serviceAccountJson)
         print("\nConnection successful!")
         print(f"Access Token (first 10 chars): {rsc_session.access_token[:10]}...")
         print(f"Polaris GraphQL URL: {rsc_session.polaris_url}")
         print(f"Logout URL: {rsc_session.logout_url}")
+
+        if args.listVMIDs:
+            # If --listVMIDs is present, list VMs and exit
+            rsc_session.list_gcp_vms()
+            sys.exit(0) # Exit cleanly after listing VMs
+
+        # --- Proceed with snapshot and monitoring if --listVMIDs is NOT present ---
+        # Validate that VMIDs and slaId are provided for snapshot operation
+        if not args.VMIDs or not args.slaId:
+            parser.error("--VMIDs and --slaId are required for snapshot operations when --listVMIDs is not used.")
+
+        vm_ids_to_backup = [vm_id.strip() for vm_id in args.VMIDs.split(',') if vm_id.strip()]
+        sla_id_for_retention = args.slaId
+        poll_interval = args.pollInterval
+        timeout = args.timeout
 
         # 2. Take On-Demand Snapshot
         print("\n--- Attempting to take on-demand snapshots ---")
@@ -518,14 +757,13 @@ if __name__ == "__main__":
             print(f"VM: {vm_name} ({vm_id}) -> Final Status: {status}")
 
 
-        # 4. Disconnect from RSC
-        print("\n--- Attempting to disconnect from RSC ---")
-        rsc_session.disconnect_rsc()
-        # Corrected the print statements to use the 'rsc_session' object
-        print(f"Access Token after disconnect: {rsc_session.access_token}") # Should be None
-        print(f"Headers after disconnect: {rsc_session.headers}") # Should be empty
-
     except (FileNotFoundError, ValueError, ConnectionError) as e:
         print(f"\nError during RSC session management: {e}")
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")
+    finally:
+        # 4. Disconnect from RSC - always attempt to disconnect
+        print("\n--- Attempting to disconnect from RSC ---")
+        rsc_session.disconnect_rsc()
+        print(f"Access Token after disconnect: {rsc_session.access_token}") # Should be None
+        print(f"Headers after disconnect: {rsc_session.headers}") # Should be empty
