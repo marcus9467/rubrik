@@ -25,10 +25,8 @@ USERID=''
 RUBRIK=''
 # SOURCE - Fileset ID that you want to restore from. This will be overwritten if SOURCE_HOSTNAME_INPUT is used.
 FILESETID=''
-# NEW: SOURCE - Hostname that you want to restore from.
 # If set, this will be used to look up the source host ID and then the FILESETID.
 SOURCE_HOSTNAME_INPUT=''
-# NEW: SOURCE - Fileset name on the source host.
 # If SOURCE_HOSTNAME_INPUT is set and multiple filesets are found, this name will be used to filter.
 SOURCE_FILESET_NAME_INPUT=''
 # SOURCE - List of directories to restore, separated by a space in the array.
