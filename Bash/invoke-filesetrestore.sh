@@ -24,7 +24,7 @@ USERID=''
 # Hostname or IP address of the Rubrik cluster
 RUBRIK=''
 # SOURCE - Fileset ID that you want to restore from. This will be overwritten if SOURCE_HOSTNAME_INPUT is used.
-FILESETID='Fileset:::ecd6533a-e110-4cfe-9d05-ce3ed5ac8ebb'
+FILESETID=''
 # NEW: SOURCE - Hostname that you want to restore from.
 # If set, this will be used to look up the source host ID and then the FILESETID.
 SOURCE_HOSTNAME_INPUT=''
@@ -33,10 +33,10 @@ SOURCE_HOSTNAME_INPUT=''
 SOURCE_FILESET_NAME_INPUT=''
 # SOURCE - List of directories to restore, separated by a space in the array.
 # All files and sub-directories under these directories will be selected for restore.
-SOURCE_DIR=('/epic')
+SOURCE_DIR=('')
 # TARGET - List of directories to restore to, must have same number of directories as $SOURCE_DIR.
 # All files and sub-directories from each source directory will be restored to the corresponding target directory.
-TARGET_DIR=('/restore')
+TARGET_DIR=('')
 # TARGET - Host ID that you want to restore to.
 # If $TARGET_HOSTID is blank, the restore will be done to the same host it was backed up from
 TARGET_HOSTID=''
@@ -65,21 +65,23 @@ log_message() {
     local type="$1" # e.g., INFO, WARN, ERROR
     local message="$2"
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    echo "[$timestamp] [$type] $message"
+    # Redirect all log_message output to stderr (file descriptor 2)
+    echo "[$timestamp] [$type] $message" >&2
     if [ -n "$LOGPATH" ]; then
+        # This part appends to the log file, which is separate from stderr
         echo "[$timestamp] [$type] $message" >> "$LOGPATH"
     fi
 }
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 [--date Watanabe-MM-DD[THH:MM:SS]]"
+    echo "Usage: $0 [--date YYYY-MM-DD[THH:MM:SS]]"
     echo ""
     echo "This script restores a Rubrik fileset to an alternate host or the same host."
     echo "Configuration variables must be set within the script."
     echo ""
     echo "Options:"
-    echo "  --date Watanabe-MM-DD[THH:MM:SS]  Select the snapshot closest to the specified UTC date and time."
+    echo "  --date YYYY-MM-DD[THH:MM:SS]  Select the snapshot closest to the specified UTC date and time."
     echo "                                If not provided, the script will prompt for manual selection."
     echo "  --help                        Display this help message."
     exit 0
@@ -115,11 +117,8 @@ authenticate() {
     log_message INFO "Successfully authenticated and acquired token."
 }
 
-# Function to set authentication header (now calls authenticate)
+# Function to set authentication header 
 set_auth_header() {
-    # This function now simply calls the `authenticate` function.
-    # The `AUTH_HEADER` and `TOKEN` global variables will be set by `authenticate`.
-    # No explicit token/user_pass check here, as `authenticate` handles it.
     if [ -z "$USERID" ] || [ -z "$SECRET" ]; then
         log_message ERROR "Service Account USERID and SECRET must be configured."
         exit 1
@@ -225,7 +224,6 @@ resolve_source_fileset_id() {
         fi
     fi
 }
-
 
 # Function to validate Rubrik cluster and target host (if specified)
 validate_environment() {
@@ -391,120 +389,225 @@ select_snapshot() {
 
 # Function to build and initiate the restore request
 initiate_restore() {
-    log_message INFO "Building restore JSON payload."
+    log_message INFO "Building export JSON payload for file-level restore."
 
-    local restore_configs=()
+    local export_configs=()
     local SOURCE_DIR_COUNT=${#SOURCE_DIR[@]}
     local i=0
+    local job_urls=() # To store URLs of all initiated jobs
 
     while [ $i -lt $SOURCE_DIR_COUNT ]; do
-        local current_source_dir="${SOURCE_DIR[$i]}"
-        local current_target_dir="${TARGET_DIR[$i]}"
+        local current_source_item="${SOURCE_DIR[$i]}" # This can be a file or a directory
+        local current_target_dir="${TARGET_DIR[$i]}" # This is the destination directory on the target host
 
-        log_message INFO "Browsing source directory: $current_source_dir for snapshot $SNAPSHOTIDTORESTORE"
-        # Added -k back as requested
-        local DIRINFO=$(curl -k -s -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' \
-            "https://$RUBRIK/api/internal/browse?limit=500&snapshot_id=$SNAPSHOTIDTORESTORE&path=$current_source_dir")
+        local EXPORT_JSON=$(jq -n \
+            --arg src "$current_source_item" \
+            --arg tgt "$current_target_dir" \
+            --arg host_id "$TARGET_HOSTID" \
+            '{
+                sourceDir: $src,
+                destinationDir: $tgt,
+                shouldRecreateDirectoryStructure: true,
+                ignoreErrors: false,
+                hostId: $host_id
+            }'
+        )
+
+        if [ -z "$TARGET_HOSTID" ]; then
+            EXPORT_JSON=$(echo "$EXPORT_JSON" | jq 'del(.hostId)')
+            log_message INFO "Restoring '${current_source_item}' to original host at '${current_target_dir}'."
+        else
+            log_message INFO "Restoring '${current_source_item}' to target host ${TARGET_RESOLVED_HOSTNAME:-$TARGET_HOSTID} at '${current_target_dir}'."
+        fi
+
+        log_message INFO "Export request payload for '${current_source_item}':"
+        # Output JSON to log, not stdout directly
+        echo "$EXPORT_JSON" | jq . >&2 
+
+        log_message INFO "Invoking export task for fileset ID: $FILESETID, snapshot ID: $SNAPSHOTIDTORESTORE"
+        local RESULT=$(curl -k -s -X POST -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
+            -d "$EXPORT_JSON" "https://$RUBRIK/api/v1/fileset/snapshot/$SNAPSHOTIDTORESTORE/export_file")
         local CURL_STATUS=$?
 
         if [ "$CURL_STATUS" -ne 0 ]; then
-            log_message ERROR "Curl failed when browsing directory '$current_source_dir': $CURL_STATUS. ABORTING."
+            log_message ERROR "Curl failed when initiating export for '${current_source_item}': $CURL_STATUS. API response: $RESULT. ABORTING."
             exit 1
         fi
-        if echo "$DIRINFO" | jq -e '.error // empty' > /dev/null; then
-            log_message ERROR "Rubrik API error when browsing directory '$current_source_dir': $(echo "$DIRINFO" | jq -r '.error.message'). ABORTING."
+        if echo "$RESULT" | jq -e '.error // empty' > /dev/null; then
+            log_message ERROR "Rubrik API error when initiating export for '${current_source_item}': $(echo "$RESULT" | jq -r '.error.message'). ABORTING."
             exit 1
         fi
 
-        # Extract filenames and construct restore config items using jq
-        local path_list=$(echo "$DIRINFO" | jq -c '.data[] | { path: (.path + "/" + .filename), restorePath: "'"$current_target_dir"'" }')
+        log_message INFO "Export job initiated for '${current_source_item}'. API response: $(echo "$RESULT" | jq -c .)" # Log compact JSON
 
-        if [ -z "$path_list" ]; then
-            log_message WARN "No files or sub-directories found under '$current_source_dir' in snapshot '$SNAPSHOTIDTORESTORE'. Skipping this source directory."
-        else
-            while IFS= read -r item; do
-                restore_configs+=("$item")
-            done <<< "$path_list"
+        local HREF=$(echo "$RESULT" | jq -r '.links[] | select(.rel == "self") | .href // empty')
+
+        if [ -z "$HREF" ] || [ "$HREF" = "null" ]; then
+            log_message ERROR "Could not extract job status URL from API response for '${current_source_item}'. Cannot monitor this specific job. ABORTING."
+            exit 1
         fi
+        job_urls+=("$HREF")
+
         ((i++))
     done
+    echo "${job_urls[@]}"
+}
 
-    if [ ${#restore_configs[@]} -eq 0 ]; then
-        log_message ERROR "No valid paths found to restore. ABORTING."
-        exit 1
+main() {
+    set -euo pipefail
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --date)
+                SNAPSHOT_DATE_ARG="$2"
+                shift 2
+                ;;
+            --help)
+                usage
+                ;;
+            *)
+                log_message ERROR "Unknown argument: $1"
+                usage
+                ;;
+        esac
+    done
+
+    if [ -n "$LOGPATH" ]; then
+        # Ensure log directory exists
+        mkdir -p "$(dirname "$LOGPATH")" || log_message WARN "Could not create log directory."
+        exec 2>> "$LOGPATH"
     fi
 
-    # Construct the final JSON payload using jq's array and object creation capabilities
-    # Join array elements with comma
-    local RESTORE_JSON_ARRAY=$(IFS=,; echo "${restore_configs[*]}")
-    local RESTORE_JSON=$(jq -n --argjson config_array "[$RESTORE_JSON_ARRAY]" '{ restoreConfig: $config_array, ignoreErrors: false }')
+    log_message INFO "Script started at $LAUNCHTIME."
 
-    log_message INFO "Restore request payload:"
-    echo "$RESTORE_JSON" | jq .
 
-    log_message INFO "Invoking restore task for fileset ID: $FILESETID, snapshot ID: $SNAPSHOTIDTORESTORE"
-    # Added -k back as requested
-    RESULT=$(curl -k -s -X POST -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
-        -d "$RESTORE_JSON" "https://$RUBRIK/api/internal/fileset/snapshot/$SNAPSHOTIDTORESTORE/restore_files")
-    local CURL_STATUS=$?
+    command -v jq >/dev/null 2>&1 || { log_message ERROR "Script requires the utility 'jq'. Aborting."; exit 1; }
 
-    if [ "$CURL_STATUS" -ne 0 ]; then
-        log_message ERROR "Curl failed when initiating restore: $CURL_STATUS. API response: $RESULT. ABORTING."
-        exit 1
+    set_auth_header
+    validate_environment
+    resolve_source_fileset_id
+    get_fileset_snapshots
+    select_snapshot
+
+    echo -e "\n--- Restore Details ---" >&2 
+    echo "Restoring from fileset: ${SOURCE_RESOLVED_FILESET_NAME:-$FILESETID} (ID: $FILESETID)" >&2
+    echo "On source host: ${SOURCE_RESOLVED_HOSTNAME:-Unknown}" >&2
+    echo "Snapshot: ${SNAPSHOTDATETORESTORE} UTC (ID: $SNAPSHOTIDTORESTORE)" >&2
+    if [ -n "$TARGET_HOSTID" ]; then
+        echo "Target host: ${TARGET_RESOLVED_HOSTNAME:-$TARGET_HOSTID} (ID: $TARGET_HOSTID)" >&2
+    else
+        echo "Restoring to original host." >&2
     fi
-    if echo "$RESULT" | jq -e '.error // empty' > /dev/null; then
-        log_message ERROR "Rubrik API error when initiating restore: $(echo "$RESULT" | jq -r '.error.message'). ABORTING."
-        exit 1
-    fi
+    echo "Source Directories to Target Directories:" >&2
+    echo "---------------------------------------" >&2
+    for i in "${!SOURCE_DIR[@]}"; do
+        echo "${SOURCE_DIR[$i]} to ${TARGET_DIR[$i]}" >&2
+    done
+    echo "---------------------------------------" >&2
 
-    log_message INFO "Restore job initiated. API response: $RESULT"
-
-    # Extract job URL for monitoring
-    local HREF=$(echo "$RESULT" | jq -r '.links[] | select(.rel == "self") | .href // empty')
-    # The API for monitoring should be v1, not internal
-    HREF=$(echo "$HREF" | sed 's/internal/v1/g')
-
-    if [ -z "$HREF" ] || [ "$HREF" = "null" ]; then
-        log_message ERROR "Could not extract job status URL from API response. Cannot monitor job. ABORTING."
-        exit 1
+    read -rp "Type 'y' to proceed with the restore: " USERPROCEED
+    if [[ "$USERPROCEED" != 'y' ]]; then
+        log_message INFO "User aborted script."
+        exit 2
     fi
 
-    echo "$HREF"
+    # Initiate restore and get job URL(s)
+    JOB_URLS_STR=$(initiate_restore) 
+    IFS=' ' read -r -a JOB_URL_ARRAY <<< "$JOB_URLS_STR"
+
+    if [ "$MONITOR" -ne 0 ]; then
+        if [ ${#JOB_URL_ARRAY[@]} -eq 0 ]; then
+            log_message WARN "No job URLs found to monitor."
+        else
+            log_message INFO "Monitoring ${#JOB_URL_ARRAY[@]} restore jobs."
+            for job_url in "${JOB_URL_ARRAY[@]}"; do
+                log_message INFO "--- Starting monitoring for job: ${job_url##*/} ---"
+                monitor_job "$job_url" || log_message ERROR "Monitoring of job ${job_url##*/} failed."
+                log_message INFO "--- Finished monitoring for job: ${job_url##*/} ---"
+            done
+        fi
+    else
+        log_message INFO "Monitoring is disabled. Jobs initiated. Check Rubrik UI for status."
+        for job_url in "${JOB_URL_ARRAY[@]}"; do
+            log_message INFO "Job URL: $job_url"
+        done
+    fi
+
+    log_message INFO "Script finished successfully."
+}
+
+main() {
+    JOB_URLS_STR=$(initiate_restore)
+    IFS=' ' read -r -a JOB_URL_ARRAY <<< "$JOB_URLS_STR" # Convert string to array
+
+    # Monitor job if configured
+    if [ "$MONITOR" -ne 0 ]; then
+        if [ ${#JOB_URL_ARRAY[@]} -eq 0 ]; then
+            log_message WARN "No job URLs found to monitor."
+        else
+            log_message INFO "Monitoring ${#JOB_URL_ARRAY[@]} restore jobs."
+            for job_url in "${JOB_URL_ARRAY[@]}"; do
+                log_message INFO "--- Starting monitoring for job: $job_url ---"
+                monitor_job "$job_url" || log_message ERROR "Monitoring of job $job_url failed."
+                log_message INFO "--- Finished monitoring for job: $job_url ---"
+            done
+        fi
+    else
+        log_message INFO "Monitoring is disabled. Jobs initiated. Check Rubrik UI for status."
+        for job_url in "${JOB_URL_ARRAY[@]}"; do
+            log_message INFO "Job URL: $job_url"
+        done
+    fi
+
+    log_message INFO "Script finished successfully."
 }
 
 # Function to monitor the restore job status
 monitor_job() {
-    local job_url="$1"
-    log_message INFO "Monitoring restore job status at: $job_url"
+    local job_url_raw="$1" 
+    log_message INFO "Monitoring restore job status for URL: $job_url_raw"
 
     local STATUS_MESSAGE=""
-    local RUBRIKSTATUS_CODE=0 # 0 for in-progress, 1 for finished
+    local RUBRIKSTATUS_CODE=0 
 
     while [ "$RUBRIKSTATUS_CODE" -eq 0 ]; do
-        # Added -k back as requested
-        local STATUS_RESPONSE=$(curl -k -s -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' "$job_url")
+        local STATUS_RESPONSE=$(curl -k -s --url "$job_url_raw" -H "$AUTH_HEADER" -H 'Content-Type: application/json')
         local CURL_STATUS=$?
 
         if [ "$CURL_STATUS" -ne 0 ]; then
-            log_message ERROR "Curl failed when monitoring job status: $CURL_STATUS. ABORTING MONITORING."
-            return 1 # Exit monitoring, not the whole script
+            log_message ERROR "Curl failed when monitoring job status for $job_url_raw: $CURL_STATUS. ABORTING MONITORING."
+            return 1 
+        fi
+        if [ -z "$STATUS_RESPONSE" ]; then
+            log_message ERROR "Empty response received when monitoring job $job_url_raw. Retrying..."
+            sleep 10 
+            continue 
         fi
         if echo "$STATUS_RESPONSE" | jq -e '.error // empty' > /dev/null; then
-            log_message ERROR "Rubrik API error when monitoring job: $(echo "$STATUS_RESPONSE" | jq -r '.error.message'). ABORTING MONITORING."
-            return 1 # Exit monitoring
+            log_message ERROR "Rubrik API error when monitoring job $job_url_raw: $(echo "$STATUS_RESPONSE" | jq -r '.error.message'). ABORTING MONITORING."
+            echo "$STATUS_RESPONSE" | jq . 
+            return 1 
         fi
 
         STATUS_MESSAGE=$(echo "$STATUS_RESPONSE" | jq -r '.status // "UNKNOWN"')
-        log_message INFO "Current job status: $STATUS_MESSAGE"
+        local JOB_PROGRESS=$(echo "$STATUS_RESPONSE" | jq -r '.progress // "N/A"')
+        local JOB_END_TIME=$(echo "$STATUS_RESPONSE" | jq -r '.endTime // "N/A"')
+
+
+        log_message INFO "Job status for ${job_url_raw##*/}: $STATUS_MESSAGE (Progress: $JOB_PROGRESS%)" # Display only job ID for cleaner log
 
         case "$STATUS_MESSAGE" in
-            SUCCEED|SUCCESS|SUCCESSWITHWARNINGS)
+            SUCCEED|SUCCEEDED|SUCCESS|SUCCESSWITHWARNINGS)
                 RUBRIKSTATUS_CODE=1
-                log_message INFO "Restore job completed successfully with status: $STATUS_MESSAGE."
+                log_message INFO "Restore job completed successfully with status: $STATUS_MESSAGE. End Time: $JOB_END_TIME."
+                break 
                 ;;
             FAIL|CANCELLED|CANCELED)
                 RUBRIKSTATUS_CODE=1
-                log_message ERROR "Restore job failed or was cancelled with status: $STATUS_MESSAGE."
+                log_message ERROR "Restore job failed or was cancelled with status: $STATUS_MESSAGE. End Time: $JOB_END_TIME."
+                local ERROR_MESSAGE=$(echo "$STATUS_RESPONSE" | jq -r '.error.message // "No specific error message provided."')
+                log_message ERROR "Job failure details: $ERROR_MESSAGE"
+                break 
                 ;;
             *)
                 log_message INFO "Job still in progress ($STATUS_MESSAGE). Waiting 60 seconds..."
@@ -512,11 +615,9 @@ monitor_job() {
                 ;;
         esac
     done
-    echo "$STATUS_RESPONSE" | jq . # Print final status
+    echo "$STATUS_RESPONSE" | jq . 
     return 0
 }
-
-# --- Main Script Execution ---
 
 main() {
     # Set strict mode for robustness
@@ -603,5 +704,4 @@ main() {
     log_message INFO "Script finished successfully."
 }
 
-# Call the main function
 main "$@"
