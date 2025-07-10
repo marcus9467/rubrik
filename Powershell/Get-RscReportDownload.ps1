@@ -20,8 +20,8 @@ param (
 
 ################################################################################################################################################################################################
 #USER INPUTS
-$ServiceAccountJson = "/Users/Marcus.Henderson/Documents/GitHub/rubrik/Powershell/marcus.henderson.json"
-$reportId = "127"
+$ServiceAccountJson = "<path to service account JSON here>"
+$reportId = "<report ID here>"
 $Output_directory = (Get-Location).path
 ################################################################################################################################################################################################
 $serviceAccountObj = Get-Content $ServiceAccountJson | ConvertFrom-Json
