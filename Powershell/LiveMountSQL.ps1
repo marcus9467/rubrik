@@ -33,13 +33,14 @@
 ##################################
 # Configure the variables below for the Rubrik Cluster
 ##################################
-$RubrikCluster = ""
+$RubrikCluster = "10.8.49.104"
 $apiEndpoint = "/api/v1/service_account/session"
 $ScriptDirectory = ""
 # The below are loaded from the above directory
 $SQLLiveMountCSV = ""
 $LogDirectory =  ""
 $jsonFilePath = ""
+
 
 # Read the JSON file
 $credentials = Get-Content -Path $jsonFilePath | ConvertFrom-Json
@@ -59,7 +60,10 @@ $body = @{
 $apiParams = @{}
 
 if ($IsWindows) {
-    if ($PSVersionTable.PSVersion.Major -lt 6) {
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Write-Host "Detected PowerShell version $($PSVersionTable.PSVersion). Using -SkipCertificateCheck parameter."
+        $apiParams.Add("SkipCertificateCheck", $true)
+    } else {
         Write-Host "Detected Windows PowerShell version $($PSVersionTable.PSVersion). Applying self-signed certificate policy."
         add-type @"
             using System.Net;
@@ -74,9 +78,6 @@ if ($IsWindows) {
 "@
         [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    } else {
-        Write-Host "Detected PowerShell version $($PSVersionTable.PSVersion). Using -SkipCertificateCheck parameter."
-        $apiParams.Add("SkipCertificateCheck", $true)
     }
 } else {
     Write-Host "Detected non-Windows OS (e.g., macOS, Linux). Using -SkipCertificateCheck parameter."
@@ -108,7 +109,7 @@ Try
         ContentType = "application/json"
         ErrorAction = "Stop"
     }
-    $authParams += $apiParams
+    $authParams = $authParams + $apiParams
     $RubrikSessionResponse = Invoke-RestMethod @authParams
 }
 Catch 
@@ -120,6 +121,7 @@ Catch
 $token = $RubrikSessionResponse.token
 $RubrikSessionHeader = @{'Authorization' = "Bearer $($token)"}
 
+# Note: We must also add the headers and content type to apiParams for subsequent calls
 $apiParams.Add("Headers", $RubrikSessionHeader)
 $apiParams.Add("ContentType", $Type)
 
@@ -134,7 +136,7 @@ Try
         TimeoutSec = 100
         ErrorAction = "Stop"
     }
-    $dbListParams += $apiParams
+    $dbListParams = $dbListParams + $apiParams
     $SQLDBListJSON = Invoke-RestMethod @dbListParams
     $SQLDBList = $SQLDBListJSON.data
 }
@@ -155,7 +157,7 @@ Try
         TimeoutSec = 100
         ErrorAction = "Stop"
     }
-    $instanceListParams += $apiParams
+    $instanceListParams = $instanceListParams + $apiParams
     $SQLInstanceJSON = Invoke-RestMethod @instanceListParams
     $SQLInstanceList = $SQLInstanceJSON.data
 }
@@ -176,7 +178,7 @@ Try
         TimeoutSec = 100
         ErrorAction = "Stop"
     }
-    $agListParams += $apiParams
+    $agListParams = $agListParams + $apiParams
     $SQLAvailabilityGroupListJSON = Invoke-RestMethod @agListParams
     $SQLAvailabilityGroupList = $SQLAvailabilityGroupListJSON.data
 }
@@ -320,7 +322,7 @@ ForEach ($SQLiveMount in $SQLiveMounts)
                 TimeoutSec = 100
                 ErrorAction = "Stop"
             }
-            $snapshotParams += $apiParams
+            $snapshotParams = $snapshotParams + $apiParams
             $SQLDBSnapshotJSON = Invoke-RestMethod @snapshotParams
             $SQLDBSnapshots = $SQLDBSnapshotJSON.data
         }
@@ -340,16 +342,15 @@ ForEach ($SQLiveMount in $SQLiveMounts)
         "SQLDBSnapshotTimeStampMS:$SQLDBSnapshotTimeStampMS"
         
         $SQLDBLiveMountURL = $baseURL+"mssql/db/"+$SourceDatabaseID+"/mount"
-        $SQLDBLiveMountJSON =
-        "{
-        ""recoveryPoint"":
-                {
-               ""timestampMs"": $SQLDBSnapshotTimeStampMS
-                },
-        ""targetInstanceId"": ""$TargetInstanceID"",
-        ""mountedDatabaseName"": ""$TargetDatabaseName""
-        }"
-        #Wait-Debugger
+        $bodyObject = @{
+            recoveryPoint = @{
+                timestampMs = $SQLDBSnapshotTimeStampMS
+            }
+            targetInstanceId = $TargetInstanceID
+            mountedDatabaseName = $TargetDatabaseName
+        }
+        $SQLDBLiveMountJSON = $bodyObject | ConvertTo-Json -Depth 5
+        
         Try 
         {
             $mountParams = @{
@@ -358,7 +359,7 @@ ForEach ($SQLiveMount in $SQLiveMounts)
                 Body = $SQLDBLiveMountJSON
                 ErrorAction = "Stop"
             }
-            $mountParams += $apiParams
+            $mountParams = $mountParams + $apiParams
             $SQLDBLiveMountPOST = Invoke-RestMethod @mountParams
             $SQLDBLiveMountSuccess = $TRUE
         }
@@ -375,15 +376,15 @@ ForEach ($SQLiveMount in $SQLiveMounts)
         $SQLJobStatusCount = 0
         DO
         {
+            $statusParams = @{
+                Uri = $SQLJobStatusURL
+                TimeoutSec = 100
+                ErrorAction = "Stop"
+            }
+            $statusParams = $statusParams + $apiParams
             $SQLJobStatusCount ++
             Try 
             {
-                $statusParams = @{
-                    Uri = $SQLJobStatusURL
-                    TimeoutSec = 100
-                    ErrorAction = "Stop"
-                }
-                $statusParams += $apiParams
                 $SQLJobStatusResponse = Invoke-RestMethod @statusParams
                 $SQLJobStatus = $SQLJobStatusResponse.status
             }
