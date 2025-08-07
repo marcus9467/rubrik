@@ -43,7 +43,7 @@ function Configure-ScriptVariables {
     
     $config = [PSCustomObject]@{
         RubrikCluster   = ""
-        ApiEndpoint     = ""
+        ApiEndpoint     = "/api/v1/service_account/session"
         ScriptDirectory = ""
         SQLLiveMountCSV = ""
         LogDirectory    = ""
@@ -403,29 +403,33 @@ function Invoke-SQLLiveMounts {
     
     # Handle PowerShell version and OS for certificate checks
     $sslSkipCheck = $false
-    if ($IsWindows) {
-        if ($PSVersionTable.PSVersion.Major -ge 6) {
-            Write-Host "Detected PowerShell version $($PSVersionTable.PSVersion). Skipping certificate check."
-            $sslSkipCheck = $true
-        } else {
-            Write-Host "Detected Windows PowerShell version $($PSVersionTable.PSVersion). Applying self-signed certificate policy."
-            add-type @"
-                using System.Net;
-                using System.Security.Cryptography.X509Certificates;
-                public class TrustAllCertsPolicy : ICertificatePolicy {
-                    public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) {
-                        return $true;
-                    }
-                }
-"@
-            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        }
-    } else {
-        Write-Host "Detected non-Windows OS. Skipping certificate check."
+if ($env:OS -eq 'Windows_NT') {
+    # It's a Windows system. Now check the PowerShell version.
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Write-Host "Detected PowerShell Core version $($PSVersionTable.PSVersion) on Windows. Skipping certificate check."
         $sslSkipCheck = $true
+    } else {
+        # This is Windows PowerShell 5.1 or older
+        Write-Host "Detected Windows PowerShell version $($PSVersionTable.PSVersion). Applying self-signed certificate policy."
+        
+        # Original logic to apply the certificate policy
+        add-type @"
+            using System.Net;
+            using System.Security.Cryptography.X509Certificates;
+            public class TrustAllCertsPolicy : ICertificatePolicy {
+                public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) {
+                    return $true;
+                }
+            }
+"@
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     }
-
+} else {
+    # It's not Windows (e.g., macOS, Linux).
+    Write-Host "Detected non-Windows OS (e.g., macOS, Linux). Skipping certificate check."
+    $sslSkipCheck = $true
+    }
     # 2. Authenticate
     $session = Invoke-RubrikAuthentication -RubrikCluster $config.RubrikCluster -ApiEndpoint $config.ApiEndpoint -JsonFilePath $config.JsonFilePath -SslSkipCheck:$sslSkipCheck
     if (-not $session) { Stop-Transcript; return }
