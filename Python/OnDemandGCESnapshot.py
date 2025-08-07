@@ -11,10 +11,10 @@ Additionally, it now supports an optional flag to list all discoverable GCP VM I
 It leverages Python's 'requests' library for API communication and 'argparse' for command-line argument parsing.
 
 Usage for On-Demand Snapshot:
-    python3 your_script_name.py --VMIDs "vm_id_1,vm_id_2,..." --slaId "your_sla_id" --serviceAccountJson "path/to/your/serviceAccount.json"
+    python3 OnDemandGCESnapshot.py --VMIDs "vm_id_1,vm_id_2,..." --slaId "your_sla_id" --serviceAccountJson "path/to/your/serviceAccount.json"
 
 Usage for Listing GCP VM IDs:
-    python3 your_script_name.py --listVMIDs --serviceAccountJson "path/to/your/serviceAccount.json"
+    python3 OnDemandGCESnapshot.py --listVMIDs --serviceAccountJson "path/to/your/serviceAccount.json"
 
 Arguments:
     --VMIDs (str, required for snapshot): A comma-separated list of UUIDs for the GCP VMs you want to back up.
