@@ -230,6 +230,63 @@ function Process-SqlData {
         SQLDBArray       = $SQLDBArray
     }
 }
+function Get-RubrikMssqlDatabase {
+    <#
+    .SYNOPSIS
+        Retrieves details for a specific MS SQL database from the Rubrik API.
+    .DESCRIPTION
+        This function performs a GET request to the /mssql/db/{MSSQL DB ID} endpoint
+        to fetch detailed information about a single SQL database.
+    .PARAMETER MssqlDbId
+        The unique ID of the MS SQL database you want to retrieve.
+    .PARAMETER BaseUrl
+        The base URL of the Rubrik cluster API (e.g., "https://10.8.49.104/api/v1").
+    .PARAMETER ApiParams
+        A hashtable containing the required parameters for the API call, such as
+        headers for authentication and any certificate handling flags.
+    .EXAMPLE
+        # Assuming $baseUrl and $apiParams are already defined
+        $dbId = "some-database-id-string"
+        Get-RubrikMssqlDatabase -MssqlDbId $dbId -BaseUrl $baseUrl -ApiParams $apiParams
+
+        # Example usage with the previous script's functions:
+        $config = Configure-ScriptVariables
+        $session = Invoke-RubrikAuthentication -RubrikCluster $config.RubrikCluster -ApiEndpoint $config.ApiEndpoint -JsonFilePath $config.JsonFilePath -SslSkipCheck
+        $apiParams = @{ Headers = $session.Headers; ContentType = "application/json" }
+        $baseUrl = "https://$($config.RubrikCluster)/api/v1"
+        $dbDetails = Get-RubrikMssqlDatabase -MssqlDbId "your-db-id-here" -BaseUrl $baseUrl -ApiParams $apiParams
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$MssqlDbId,
+
+        [Parameter(Mandatory=$true)]
+        [string]$BaseUrl,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$ApiParams
+    )
+
+    try {
+        $dbUrl = "$BaseUrl/mssql/db/$MssqlDbId"
+        Write-Host "Fetching details for MS SQL DB ID: $MssqlDbId"
+
+        $callParams = @{
+            Uri = $dbUrl
+            TimeoutSec = 100
+            ErrorAction = "Stop"
+        }
+        $callParams = $callParams + $ApiParams
+
+        $response = Invoke-RestMethod @callParams
+        return $response
+    }
+    catch {
+        Write-Error "Failed to retrieve MS SQL database details for ID '$MssqlDbId'. Error: $($_.Exception.Message)"
+        return $null
+    }
+}
 
 function New-SQLLiveMount {
     <#
