@@ -21,7 +21,6 @@
 # - Example CSV Line = 172.17.60.69,SQLEXPRESS,SE-JSTENHOUSE-AdventureWorks2016,172.17.60.69,SQLEXPRESS,AdventureWorks2016-LiveMount1
 # - All options specified are tested to see if they exist in Rubrik
 # - This script always mounts the latest snapshot available
-# - The 'Invoke-SqlCmd' PowerShell module must be available for unmount operations.
 ##################################
 # Legal Disclaimer:
 # This script is written by Joshua Stenhouse is not supported under any support program or service.
