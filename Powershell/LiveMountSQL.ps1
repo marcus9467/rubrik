@@ -8,27 +8,28 @@
 # Overhauled script to be more modular and use functions
 # Updated the authentication logic to use RSC service accounts
 # Updated the certificate handling to be more inclusive to newer versions of Powershell and alternative OSes
-################################## 
+# Combined Mount and Unmount logic into a single script with a configurable operation flag.
+##################################
 # Description:
-# This script creates multiple SQL live mounts from the CSV specified
-################################## 
+# This script creates or unmounts multiple SQL live mounts based on a specified CSV file.
+##################################
 # Requirements:
 # - Run PowerShell as administrator with command "Set-ExecutionPolcity unrestricted" on the host running the script
 # - A Rubrik cluster or EDGE appliance, network access to it and credentials to login
 # - At least 1 sql database protected in Rubrik and therefore 1 windows host
 # - A CSV with the following fields: SourceSQLHostName,SourceInstanceName,SourceDatabaseName,TargetSQLHostName,TargetInstanceName,TargetDatabaseName
 # - Example CSV Line = 172.17.60.69,SQLEXPRESS,SE-JSTENHOUSE-AdventureWorks2016,172.17.60.69,SQLEXPRESS,AdventureWorks2016-LiveMount1
-# - Example CSV Line = AvailabilityGroup,SQLAG1,vSphereChangeControlv1,SQL16-VM01.lab.local,MSSQLSERVER,DemoDBLiveMount2
 # - All options specified are tested to see if they exist in Rubrik
 # - This script always mounts the latest snapshot available
+# - The 'Invoke-SqlCmd' PowerShell module must be available for unmount operations.
 ##################################
 # Legal Disclaimer:
-# This script is written by Joshua Stenhouse is not supported under any support program or service. 
-# All scripts are provided AS IS without warranty of any kind. 
-# The author further disclaims all implied warranties including, without limitation, any implied warranties of merchantability or of fitness for a particular purpose. 
-# The entire risk arising out of the use or performance of the sample scripts and documentation remains with you. 
-# In no event shall its authors, or anyone else involved in the creation, production, or delivery of the scripts be liable for any damages whatsoever 
-# (including, without limitation, damages for loss of business profits, business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability to use the sample scripts or documentation, 
+# This script is written by Joshua Stenhouse is not supported under any support program or service.
+# All scripts are provided AS IS without warranty of any kind.
+# The author further disclaims all implied warranties including, without limitation, any implied warranties of merchantability or of fitness for a particular purpose.
+# The entire risk arising out of the use or performance of the sample scripts and documentation remains with you.
+# In no event shall its authors, or anyone else involved in the creation, production, or delivery of the scripts be liable for any damages whatsoever
+# (including, without limitation, damages for loss of business profits, business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability to use the sample scripts or documentation,
 # even if the author has been advised of the possibility of such damages.
 ##################################
 function Configure-ScriptVariables {
@@ -44,10 +45,9 @@ function Configure-ScriptVariables {
     $config = [PSCustomObject]@{
         RubrikCluster   = ""
         ApiEndpoint     = "/api/v1/service_account/session"
-        ScriptDirectory = ""
         SQLLiveMountCSV = ""
-        LogDirectory    = ""
         JsonFilePath    = ""
+        LogDirectory    = ""
     }
 
     return $config
@@ -143,15 +143,19 @@ function Get-RubrikApiData {
     )
 
     $apiEndpoints = @{
-        'SQLDBList'             = "$BaseUrl/mssql/db?limit=5000&is_relic=false"
-        'SQLInstanceList'       = "$BaseUrl/mssql/instance?limit=5000"
+        'SQLDBList'              = "$BaseUrl/mssql/db?limit=5000&is_relic=false"
+        'SQLInstanceList'        = "$BaseUrl/mssql/instance?limit=5000"
         'SQLAvailabilityGroupList' = "$InternalUrl/mssql/availability_group"
+        'WindowsHosts'           = "$BaseUrl/host?limit=5000"
+        'SQLActiveLiveMounts'    = "$BaseUrl/mssql/db/mount"
     }
 
     $apiData = [PSCustomObject]@{
-        SQLDBList             = $null
-        SQLInstanceList       = $null
+        SQLDBList                = $null
+        SQLInstanceList          = $null
         SQLAvailabilityGroupList = $null
+        WindowsHosts             = $null
+        SQLActiveLiveMounts      = $null
     }
 
     foreach ($key in $apiEndpoints.Keys) {
@@ -186,7 +190,7 @@ function Process-SqlData {
         availability groups and creates two user-friendly arrays: one for SQL instances
         and one for SQL databases, including host information for easier lookups.
     .PARAMETER ApiData
-        A PSCustomObject containing the raw API data (databases, instances, AGs).
+        A PSCustomObject containing the raw API data (databases, instances, AGs, hosts, etc.).
     #>
     param(
         [PSCustomObject]$ApiData
@@ -226,8 +230,10 @@ function Process-SqlData {
         }
     }
     return [PSCustomObject]@{
-        SQLInstanceArray = $SQLInstanceArray
-        SQLDBArray       = $SQLDBArray
+        SQLInstanceArray      = $SQLInstanceArray
+        SQLDBArray            = $SQLDBArray
+        SQLActiveLiveMounts   = $ApiData.SQLActiveLiveMounts
+        WindowsHosts          = $ApiData.WindowsHosts
     }
 }
 function Get-RubrikMssqlDatabase {
@@ -244,17 +250,6 @@ function Get-RubrikMssqlDatabase {
     .PARAMETER ApiParams
         A hashtable containing the required parameters for the API call, such as
         headers for authentication and any certificate handling flags.
-    .EXAMPLE
-        # Assuming $baseUrl and $apiParams are already defined
-        $dbId = "some-database-id-string"
-        Get-RubrikMssqlDatabase -MssqlDbId $dbId -BaseUrl $baseUrl -ApiParams $apiParams
-
-        # Example usage with the previous script's functions:
-        $config = Configure-ScriptVariables
-        $session = Invoke-RubrikAuthentication -RubrikCluster $config.RubrikCluster -ApiEndpoint $config.ApiEndpoint -JsonFilePath $config.JsonFilePath -SslSkipCheck
-        $apiParams = @{ Headers = $session.Headers; ContentType = "application/json" }
-        $baseUrl = "https://$($config.RubrikCluster)/api/v1"
-        $dbDetails = Get-RubrikMssqlDatabase -MssqlDbId "your-db-id-here" -BaseUrl $baseUrl -ApiParams $apiParams
     #>
     [CmdletBinding()]
     param(
@@ -287,7 +282,6 @@ function Get-RubrikMssqlDatabase {
         return $null
     }
 }
-
 function New-SQLLiveMount {
     <#
     .SYNOPSIS
@@ -429,20 +423,134 @@ function New-SQLLiveMount {
         Write-Error "Live mount API call failed. Error: $($_.Exception.Message)"
     }
 }
-
-function Invoke-SQLLiveMounts {
+function Remove-SQLLiveMount {
     <#
     .SYNOPSIS
-        Main function to orchestrate the entire live mount process.
+        Unmounts a single SQL live mount from a Rubrik cluster.
+    .DESCRIPTION
+        This function takes the details of a live mount from a CSV, validates
+        that the live mount exists in the Rubrik cluster, and then initiates the
+        unmount operation via the Rubrik API. It polls the job status until completion.
+        This version relies solely on the Rubrik API to perform the unmount and cleanup,
+        removing the dependency on the 'Invoke-SqlCmd' module.
+    .PARAMETER MountInfo
+        A PSCustomObject representing a single row from the CSV, containing details for the live mount to be removed.
+    .PARAMETER RubrikData
+        A PSCustomObject containing the processed SQL instance and active live mount data from the Rubrik cluster.
+    .PARAMETER BaseUrl
+        The base URL for the Rubrik cluster API (e.g., "https://rubrik_cluster_ip/api/v1").
+    .PARAMETER ApiParams
+        A hashtable containing the required parameters for the API call, such as headers for authentication and any certificate handling flags.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [PSCustomObject]$MountInfo,
+
+        [Parameter(Mandatory=$true)]
+        [PSCustomObject]$RubrikData,
+
+        [Parameter(Mandatory=$true)]
+        [string]$BaseUrl,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$ApiParams
+    )
+
+    Write-Host "--------------------------------------------"
+    Write-Host "Processing Unmount Request..."
+    Write-Host "  Live Mount: $($MountInfo.TargetDatabaseName) on Instance: $($MountInfo.TargetInstanceName) at Host: $($MountInfo.TargetSQLHostName)"
+
+    # Get the target instance ID and the live mount ID
+    $targetInstanceId = ($RubrikData.SQLInstanceArray | Where-Object { ($_.HostName -eq $MountInfo.TargetSQLHostName) -and ($_.InstanceName -eq $MountInfo.TargetInstanceName) } | Select-Object -First 1).InstanceID
+    $sqlLiveMountId = ($RubrikData.SQLActiveLiveMounts | Where-Object {
+        ($_.targetRootName -eq $MountInfo.TargetSQLHostName) -and
+        ($_.sourceDatabaseName -eq $MountInfo.SourceDatabaseName) -and
+        ($_.targetInstanceID -eq $targetInstanceId) -and
+        ($_.mountedDatabaseName -like $MountInfo.TargetDatabaseName)
+    } | Select-Object -ExpandProperty id -First 1)
+
+    if (-not $sqlLiveMountId) {
+        Write-Warning "Active Live Mount not found for target database '$($MountInfo.TargetDatabaseName)'. Skipping unmount."
+        return
+    }
+
+    Write-Host "Active Live Mount found with ID: $sqlLiveMountId."
+
+    # Perform the unmount via API
+    try {
+        $unmountUrl = "$BaseUrl/mssql/db/mount/$sqlLiveMountId"
+        Write-Host "Submitting unmount request to: $unmountUrl"
+
+        $callParams = @{
+            Method = "Delete"
+            Uri = $unmountUrl
+            ErrorAction = "Stop"
+        }
+        $callParams = $callParams + $ApiParams
+
+        $unmountResponse = Invoke-RestMethod @callParams
+        $jobStatusUrl = $unmountResponse.links.href
+        $jobStatus = "QUEUED"
+        Write-Host "Unmount job started. Polling status..."
+        $jobSucceeded = $false
+
+        $maxAttempts = 300
+        $attempt = 0
+        do {
+            $attempt++
+            Start-Sleep -Seconds 1
+            try {
+                $statusResponse = Invoke-RestMethod -Uri $jobStatusUrl @ApiParams -ErrorAction Stop
+                $jobStatus = $statusResponse.status
+                Write-Host "Job status: $jobStatus (Attempt $attempt/$maxAttempts)"
+
+                if ($jobStatus -eq "SUCCEEDED") {
+                    $jobSucceeded = $true
+                }
+            } catch {
+                # A 404 response on the job status URL often means the job completed and was cleaned up.
+                if ($_.Exception.Response.StatusCode -eq 404) {
+                    Write-Host "Job status URL returned 404. Assuming job has completed and been cleaned up."
+                    $jobSucceeded = $true
+                    break
+                }
+                # For any other error, re-throw it.
+                else {
+                    throw $_.Exception
+                }
+            }
+        } while (($jobStatus -ne "SUCCEEDED") -and ($jobStatus -ne "FAILED") -and ($jobStatus -ne "CANCELED") -and ($attempt -lt $maxAttempts))
+
+        if ($jobSucceeded) {
+            Write-Host "Unmount successfully completed for $($MountInfo.TargetDatabaseName)."
+        } else {
+            Write-Error "Unmount job for $($MountInfo.TargetDatabaseName) failed with status: $jobStatus."
+        }
+    } catch {
+        Write-Error "Unmount API call failed. Error: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-RubrikSQLOperations {
+    <#
+    .SYNOPSIS
+        Main function to orchestrate the entire live mount or unmount process.
     .DESCRIPTION
         This is the main entry point of the script. It calls all other functions
-        in sequence to configure, authenticate, fetch data, and perform live mounts
-        for all entries in the specified CSV file.
+        in sequence to configure, authenticate, fetch data, and perform either
+        live mounts or unmounts for all entries in the specified CSV file.
+    .PARAMETER Operation
+        The operation to perform. Valid values are 'Mount' or 'Unmount'.
     .PARAMETER CsvFilePath
         The path to the CSV file containing the live mount requests. If not provided,
         it uses the path from `Configure-ScriptVariables`.
     #>
     param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet("Mount", "Unmount")]
+        [string]$Operation,
+
         [string]$CsvFilePath = ""
     )
 
@@ -455,38 +563,34 @@ function Invoke-SQLLiveMounts {
         New-Item -Path $config.LogDirectory -ItemType Directory | Out-Null
     }
     
-    $logPath = "$($config.LogDirectory)\Rubrik-SQLLiveMountLog-$(Get-Date -Format 'yyyy-MM-dd@HH-mm-ss').log"
+    $logPath = "$($config.LogDirectory)\Rubrik-SQL$(if($Operation -eq 'Mount'){'Mount'}else{'Unmount'})Log-$(Get-Date -Format 'yyyy-MM-dd@HH-mm-ss').log"
     Start-Transcript -Path $logPath -NoClobber
     
     # Handle PowerShell version and OS for certificate checks
     $sslSkipCheck = $false
-if ($env:OS -eq 'Windows_NT') {
-    # It's a Windows system. Now check the PowerShell version.
-    if ($PSVersionTable.PSVersion.Major -ge 6) {
-        Write-Host "Detected PowerShell Core version $($PSVersionTable.PSVersion) on Windows. Skipping certificate check."
-        $sslSkipCheck = $true
-    } else {
-        # This is Windows PowerShell 5.1 or older
-        Write-Host "Detected Windows PowerShell version $($PSVersionTable.PSVersion). Applying self-signed certificate policy."
-        
-        # Original logic to apply the certificate policy
-        add-type @"
-            using System.Net;
-            using System.Security.Cryptography.X509Certificates;
-            public class TrustAllCertsPolicy : ICertificatePolicy {
-                public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) {
-                    return $true;
+    if ($env:OS -eq 'Windows_NT') {
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            Write-Host "Detected PowerShell Core version $($PSVersionTable.PSVersion) on Windows. Skipping certificate check."
+            $sslSkipCheck = $true
+        } else {
+            Write-Host "Detected Windows PowerShell version $($PSVersionTable.PSVersion). Applying self-signed certificate policy."
+            add-type @"
+                using System.Net;
+                using System.Security.Cryptography.X509Certificates;
+                public class TrustAllCertsPolicy : ICertificatePolicy {
+                    public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) {
+                        return $true;
+                    }
                 }
-            }
 "@
-        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        }
+    } else {
+        Write-Host "Detected non-Windows OS (e.g., macOS, Linux). Skipping certificate check."
+        $sslSkipCheck = $true
     }
-} else {
-    # It's not Windows (e.g., macOS, Linux).
-    Write-Host "Detected non-Windows OS (e.g., macOS, Linux). Skipping certificate check."
-    $sslSkipCheck = $true
-    }
+    
     # 2. Authenticate
     $session = Invoke-RubrikAuthentication -RubrikCluster $config.RubrikCluster -ApiEndpoint $config.ApiEndpoint -JsonFilePath $config.JsonFilePath -SslSkipCheck:$sslSkipCheck
     if (-not $session) { Stop-Transcript; return }
@@ -506,31 +610,68 @@ if ($env:OS -eq 'Windows_NT') {
     $rubrikData = Process-SqlData -ApiData $apiData
     if (-not $rubrikData) { Stop-Transcript; return }
 
-    # 5. Read CSV and perform live mounts
+    # 5. Read CSV and perform the chosen operation
     if (-not (Test-Path $config.SQLLiveMountCSV)) {
         Write-Error "CSV file not found at $($config.SQLLiveMountCSV). Exiting."
         Stop-Transcript
         return
     }
 
-    $liveMounts = Import-Csv $config.SQLLiveMountCSV
-    if (-not $liveMounts) {
+    $mounts = Import-Csv $config.SQLLiveMountCSV
+    if (-not $mounts) {
         Write-Warning "No data found in CSV file. Exiting."
         Stop-Transcript
         return
     }
 
-    foreach ($mount in $liveMounts) {
-        # Check for same source and target, and auto-rename if needed
-        $targetDbName = $mount.TargetDatabaseName
-        if (($mount.SourceSQLHostName -eq $mount.TargetSQLHostName) -and
-            ($mount.SourceInstanceName -eq $mount.TargetInstanceName) -and
-            ($mount.SourceDatabaseName -eq $mount.TargetDatabaseName)) {
-            Write-Host "Source and target are identical. Appending '-live' to the target database name."
-            $targetDbName = $mount.TargetDatabaseName + "-live"
+    foreach ($mount in $mounts) {
+        switch ($Operation) {
+            "Mount" {
+                # Check for same source and target, and auto-rename if needed
+                $targetDbName = $mount.TargetDatabaseName
+                if (($mount.SourceSQLHostName -eq $mount.TargetSQLHostName) -and
+                    ($mount.SourceInstanceName -eq $mount.TargetInstanceName) -and
+                    ($mount.SourceDatabaseName -eq $mount.TargetDatabaseName)) {
+                    Write-Host "Source and target are identical. Appending '-live' to the target database name."
+                    $targetDbName = $mount.TargetDatabaseName + "-live"
+                }
+                $mount.TargetDatabaseName = $targetDbName
+                New-SQLLiveMount -MountInfo $mount -RubrikData $rubrikData -BaseUrl $baseUrl -ApiParams $apiParams -UseLatestRecoveryPoint
+            }
+            "Unmount" {
+                Remove-SQLLiveMount -MountInfo $mount -RubrikData $rubrikData -BaseUrl $baseUrl -ApiParams $apiParams
+                # Post-unmount refresh logic for hosts
+                $uniqueTargetHosts = $mounts | Select-Object -ExpandProperty TargetSQLHostName -Unique
+                foreach ($hostName in $uniqueTargetHosts) {
+                    Write-Host "Refreshing host: $hostName"
+                    $hostId = ($rubrikData.WindowsHosts | Where-Object { $_.name -eq $hostName }).id
+                    if ($hostId) {
+                        $hostRefreshUrl = "$baseUrl/host/$hostId/refresh"
+                        try {
+                            $refreshParams = @{
+                                Method = "POST"
+                                Uri = $hostRefreshUrl
+                                TimeoutSec = 100
+                                Headers = $apiParams.Headers
+                                ContentType = $apiParams.ContentType
+                            }
+                            # Add the SkipCertificateCheck parameter if it's in $apiParams
+                            if ($apiParams.ContainsKey("SkipCertificateCheck")) {
+                                $refreshParams.Add("SkipCertificateCheck", $apiParams.SkipCertificateCheck)
+                            }
+                            
+                            Invoke-RestMethod @refreshParams | Out-Null
+                            Write-Host "Refresh request sent for $hostName. Waiting 20 seconds..."
+                            Start-Sleep -Seconds 20
+                        } catch {
+                            Write-Error "Failed to refresh host '$hostName'. Error: $($_.Exception.Message)"
+                        }
+                    } else {
+                        Write-Warning "Host ID not found for '$hostName'. Skipping refresh."
+                    }
+                }
+            }
         }
-        $mount.TargetDatabaseName = $targetDbName
-        New-SQLLiveMount -MountInfo $mount -RubrikData $rubrikData -BaseUrl $baseUrl -ApiParams $apiParams -UseLatestRecoveryPoint
     }
 
     Write-Host "--------------------------------------------"
@@ -538,4 +679,4 @@ if ($env:OS -eq 'Windows_NT') {
     Stop-Transcript
 }
 
-Invoke-SQLLiveMounts
+Invoke-RubrikSQLOperations -Operation Mount
