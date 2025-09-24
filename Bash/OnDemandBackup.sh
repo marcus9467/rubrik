@@ -1,10 +1,10 @@
 #!/bin/bash
-# Set this to /opt/freeware/bin/bash on AIX hosts as this is the typical location if bash is present. 
+# Set this to /opt/freeware/bin/bash on AIX hosts as this is the typical location if bash is present.
 # Requires 'curl' and 'jq'
 # Date: 2024/07/08
 
-# CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 # TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 # This script will take an on-demand backup of a fileset with a corresponding SLA, and also provides APIs to collect SLA Domain and Fileset information.
@@ -73,7 +73,7 @@ get_all_sla_domains() {
     # Use the v2 SLA Domain API endpoint
     sla_response=$(curl -k -s -X GET "https://$RUBRIK/api/v2/sla_domain" \
       -H "accept: application/json" -H "$AUTH_HEADER")
-    
+
     # Use jq to filter for only the name and ID from the 'data' array
     if echo "$sla_response" | jq -e '.data' >/dev/null; then
         echo "$sla_response" | jq -r '.data[] | "SLA Name: \(.name), SLA ID: \(.id)"'
@@ -131,6 +131,7 @@ trigger_on_demand_backup() {
             exit 1
         fi
         echo "Backup triggered successfully. Monitoring: $MONITOR"
+	echo $RESULT
 
         if [ $MONITOR -ne 0 ]; then
             # Monitor the backup status
@@ -140,7 +141,7 @@ trigger_on_demand_backup() {
             while [ $RUBRIKSTATUS -eq 0 ]; do
                 # Query the URL for the current status of the on-demand backup
                 renew_token_if_needed
-                STATUS=$(curl -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' "https://$RUBRIK$HREF" -k -s)
+                STATUS=$(curl -H "$AUTH_HEADER" -X GET -H 'Content-Type: application/json' "$HREF" -k -s)
 
                 # Check if any of the end states are found, if so, $RUBRIKSTATUS changes and loop exits
                 RUBRIKSTATUS=$(echo "$STATUS" | grep -E 'SUCCEED|SUCCESS|SUCCESSWITHWARNINGS|FAIL|CANCEL' | wc -l)
