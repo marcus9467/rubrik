@@ -744,10 +744,41 @@ function Get-SnapshotsForObject {
                     foreach ($edge in $pageData.edges) {
                         $node = $edge.node
 
+                        # --- Parse Expiration Dates ---
+                        $localExpiration = "Forever" # Default to "Forever"
+                        if ($node.snapshotRetentionInfo -and $node.snapshotRetentionInfo.localInfo -and $node.snapshotRetentionInfo.localInfo.expirationTime) {
+                            $localExpiration = $node.snapshotRetentionInfo.localInfo.expirationTime
+                        }
+
+                        # Handle Archival Expirations (it's an array)
+                        $archivalExpirations = "N/A" # Default if no archives
+                        if ($node.snapshotRetentionInfo -and $node.snapshotRetentionInfo.archivalInfos -and $node.snapshotRetentionInfo.archivalInfos.Count -gt 0) {
+                            $archivalExpirationStrings = $node.snapshotRetentionInfo.archivalInfos | ForEach-Object {
+                                $locName = if ($_.name) { $_.name } else { "UnknownLocation" }
+                                $expTime = if ($_.expirationTime) { $_.expirationTime } else { "Forever" }
+                                "$locName $expTime"
+                            }
+                            $archivalExpirations = $archivalExpirationStrings -join "; "
+                        }
+
+                        # Handle Replication Expirations (it's an array)
+                        $replicationExpirations = "N/A" # Default if no replicas
+                        if ($node.snapshotRetentionInfo -and $node.snapshotRetentionInfo.replicationInfos -and $node.snapshotRetentionInfo.replicationInfos.Count -gt 0) {
+                            $replicationExpirationStrings = $node.snapshotRetentionInfo.replicationInfos | ForEach-Object {
+                                $locName = if ($_.name) { $_.name } else { "UnknownLocation" }
+                                $expTime = if ($_.expirationTime) { $_.expirationTime } else { "Forever" }
+                                "$locName $expTime"
+                            }
+                            $replicationExpirations = $replicationExpirationStrings -join "; "
+                        }
+                        # --- End Parse Expiration Dates ---
+
                         $flatSnap = [PSCustomObject]@{
                             SnapshotId = $node.id
                             SnapshotDate = $node.date
-                            ExpirationDate = $node.expirationDate
+                            LocalExpiration = $localExpiration
+                            ArchivalExpirations = $archivalExpirations
+                            ReplicationExpirations = $replicationExpirations
                             UnmanagedStatus = $ParentUnmanagedStatus # Added this field
                             IsOnDemand = $node.isOnDemandSnapshot
                             IsRetentionLocked = $node.isRetentionLocked
