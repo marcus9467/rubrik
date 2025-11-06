@@ -1,8 +1,7 @@
 <#
 .SYNOPSIS
 This script updates the retention SLA for a list of specified Rubrik snapshots.
-It can either take a direct list of snapshot IDs or query for them based on an object ID and cluster UUID, 
-then enumerate all snapshots for those objects.
+It can either query for snapshots and export them, or import a previously exported CSV to perform the update.
 
 .EXAMPLE
 # Example 1: Update retention for manually specified snapshot IDs
@@ -20,9 +19,16 @@ then enumerate all snapshots for those objects.
 # Example 4: Query for *only relic* objects on a cluster, get all their snapshots, and export to CSV
 ./Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ClusterUuid "cluster-uuid-abc" -RelicObjectsOnly -ExportCsvPath "C:\temp\relic_snapshots.csv"
 
+.EXAMPLE
+# Example 5: Import a manually reviewed CSV and apply a new SLA to only the snapshots listed in the file.
+# This is the recommended safe workflow for bulk updates.
+# Step 1 (Export): .\Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ClusterUuid "cluster-uuid-abc" -ExportCsvPath "C:\temp\review_snapshots.csv"
+# Step 2 (Manual): Manually edit "review_snapshots.csv" and remove any rows you do not want to update.
+# Step 3 (Import & Update): .\Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -NewSlaId "sla-id-123" -ImportCsvPath "C:\temp\review_snapshots.csv" -UserNote "Bulk update per ticket #12345"
+
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com>
-    Adapted : October 31, 2025
+    Adapted : November 6, 2025
     Company : Rubrik Inc
     Purpose : Framework for bulk snapshot SLA retention updates.
 #>
@@ -63,6 +69,10 @@ param (
     # Parameter for CSV export
     [parameter(Mandatory=$false)]
     [string]$ExportCsvPath,
+
+    # Parameter for CSV import
+    [parameter(Mandatory=$false)]
+    [string]$ImportCsvPath,
 
     # Optional note for the retention change
     [parameter(Mandatory=$false)]
@@ -408,6 +418,9 @@ function Get-SnapshotsForObject {
 
         [parameter(Mandatory=$false)]
         [string]$ParentUnmanagedStatus = "",
+
+        [parameter(Mandatory=$false)]
+        [string]$ParentObjectName = "",
 
         [parameter(Mandatory=$false)]
         [int]$First = 50,
@@ -774,6 +787,7 @@ function Get-SnapshotsForObject {
                         # --- End Parse Expiration Dates ---
 
                         $flatSnap = [PSCustomObject]@{
+                            ObjectName = $ParentObjectName
                             SnapshotId = $node.id
                             SnapshotDate = $node.date
                             LocalExpiration = $localExpiration
@@ -906,93 +920,126 @@ Write-Host "Authentication successful."
 $snapshotsToUpdate = [System.Collections.ArrayList]::new() # Changed to ArrayList
 $allDetailedSnapshots = [System.Collections.ArrayList]::new() # Changed to ArrayList
 
-# Add manually provided snapshot IDs
-if ($PSBoundParameters.ContainsKey('SnapshotIds')) {
-    [void]$snapshotsToUpdate.AddRange($SnapshotIds) # Use [void] to suppress output
-    Write-Host "Added $($SnapshotIds.Count) manually specified snapshot IDs."
-}
-
-# Check for -RelicObjectsOnly switch
-if ($RelicObjectsOnly.IsPresent) {
-    Write-Host "Filtering for Relic Objects only." -ForegroundColor Yellow
-    $FilterUnmanagedStatuses = @("RELIC", "REPLICATED_RELIC", "REMOTE_UNPROTECTED")
-}
-
-# Query for objects if ClusterUuid is provided
-if ($PSBoundParameters.ContainsKey('ClusterUuid')) {
-    Write-Host "Querying for objects based on ClusterUuid '$ClusterUuid'..."
+# --- New Workflow: Import from CSV ---
+if ($PSBoundParameters.ContainsKey('ImportCsvPath') -and -not [string]::IsNullOrWhiteSpace($ImportCsvPath)) {
+    Write-Host "Importing snapshots from CSV at '$ImportCsvPath'..."
     
-    $queryArgs = @{
-        "ClusterUuid" = $ClusterUuid
-        "GUS_RetentionSlaDomainIds" = $FilterRetentionSlaDomainIds
-        "GUS_ObjectTypes" = $FilterObjectTypes
-        "GUS_UnmanagedStatuses" = $FilterUnmanagedStatuses
-        "GUS_SortParam" = $SortParam
-        "Headers" = $headers
-        "GraphQL_URL" = $GraphQL_URL
+    if (-not ($PSBoundParameters.ContainsKey('NewSlaId') -and -not [string]::IsNullOrWhiteSpace($NewSlaId))) {
+        Write-Error "Using -ImportCsvPath requires the -NewSlaId parameter to be specified."
+        Disconnect-Polaris -Headers $headers -LogoutUrl $LogoutUrl
+        return
     }
 
-    if ($PSBoundParameters.ContainsKey('ObjectId') -and -not [string]::IsNullOrWhiteSpace($ObjectId)) {
-        Write-Host "  ...and filtering by ObjectId '$ObjectId'."
-        $queryArgs.Add("ObjectId", $ObjectId)
-    }
-    
-    # 1. Get the list of objects
-    $foundObjects = Get-UnmanagedSnapshots @queryArgs
-    
-    if ($foundObjects -and $foundObjects.Count -gt 0) {
-        Write-Host "Successfully queried $($foundObjects.Count) object(s)."
+    try {
+        $snapshotsFromCsv = Import-Csv -Path $ImportCsvPath
         
-        $summaryList = [System.Collections.ArrayList]::new()
-
-        # 2. Loop through each object and get its detailed snapshots
-        Write-Host "Now fetching detailed snapshots for each object..."
-        foreach ($object in $foundObjects) {
-            # Pass the parent object's UnmanagedStatus to the snapshot function
-            $detailedSnapshots = Get-SnapshotsForObject -SnappableId $object.WorkloadId -Headers $headers -GraphQL_URL $GraphQL_URL -ParentUnmanagedStatus $object.UnmanagedStatus
-            
-            $snapshotCount = 0
-            if ($detailedSnapshots -and $detailedSnapshots.Count -gt 0) {
-                [void]$allDetailedSnapshots.AddRange($detailedSnapshots) # Use [void] to suppress output
-                $snapshotCount = $detailedSnapshots.Count
-            }
-            
-            # Add to summary
-            [void]$summaryList.Add([PSCustomObject]@{
-                ObjectId = $object.ObjectId
-                ObjectName = $object.Name
-                UnmanagedStatus = $object.UnmanagedStatus
-                SnapshotCount = $snapshotCount
-            })
+        if ($null -eq $snapshotsFromCsv -or $snapshotsFromCsv.Count -eq 0) {
+            Write-Warning "CSV file at '$ImportCsvPath' is empty or could not be read. No snapshots to update."
         }
-        Write-Host "Total detailed snapshots found: $($allDetailedSnapshots.Count)"
+        elseif (-not ($snapshotsFromCsv[0].PSObject.Properties.Name -contains 'SnapshotId')) {
+            Write-Error "CSV file must contain a 'SnapshotId' column. Aborting update."
+        }
+        else {
+            $snapshotIdsFromCsv = $snapshotsFromCsv | ForEach-Object { $_.SnapshotId } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            [void]$snapshotsToUpdate.AddRange($snapshotIdsFromCsv)
+            Write-Host "Successfully imported $($snapshotIdsFromCsv.Count) snapshot IDs from CSV for processing."
+        }
+    }
+    catch {
+        Write-Error "Failed to read CSV from '$ImportCsvPath'. Error: $($_)"
+    }
+}
+# --- Standard Workflow: Query or Manual IDs ---
+else {
+    # Add manually provided snapshot IDs
+    if ($PSBoundParameters.ContainsKey('SnapshotIds')) {
+        [void]$snapshotsToUpdate.AddRange($SnapshotIds) # Use [void] to suppress output
+        Write-Host "Added $($SnapshotIds.Count) manually specified snapshot IDs."
+    }
 
-        # --- Print Summary ---
-        Write-Host "`n--- Snapshot Query Summary ---" -ForegroundColor Green
-        $summaryList | Format-Table -AutoSize
-        Write-Host "------------------------------`n" -ForegroundColor Green
+    # Check for -RelicObjectsOnly switch
+    if ($RelicObjectsOnly.IsPresent) {
+        Write-Host "Filtering for Relic Objects only." -ForegroundColor Yellow
+        $FilterUnmanagedStatuses = @("RELIC", "REPLICATED_RELIC", "REMOTE_UNPROTECTED")
+    }
 
+    # Query for objects if ClusterUuid is provided
+    if ($PSBoundParameters.ContainsKey('ClusterUuid')) {
+        Write-Host "Querying for objects based on ClusterUuid '$ClusterUuid'..."
+        
+        $queryArgs = @{
+            "ClusterUuid" = $ClusterUuid
+            "GUS_RetentionSlaDomainIds" = $FilterRetentionSlaDomainIds
+            "GUS_ObjectTypes" = $FilterObjectTypes
+            "GUS_UnmanagedStatuses" = $FilterUnmanagedStatuses
+            "GUS_SortParam" = $SortParam
+            "Headers" = $headers
+            "GraphQL_URL" = $GraphQL_URL
+        }
 
-        # 3. Export to CSV if path is provided
-        if ($PSBoundParameters.ContainsKey('ExportCsvPath') -and -not [string]::IsNullOrWhiteSpace($ExportCsvPath)) {
-            try {
-                Write-Host "Exporting detailed snapshot list to '$ExportCsvPath'..."
-                $allDetailedSnapshots | Export-Csv -Path $ExportCsvPath -NoTypeInformation -Encoding UTF8
-                Write-Host "Export complete."
-            }
-            catch {
-                Write-Error "Failed to export CSV file. Error: $($_)"
-            }
+        if ($PSBoundParameters.ContainsKey('ObjectId') -and -not [string]::IsNullOrWhiteSpace($ObjectId)) {
+            Write-Host "  ...and filtering by ObjectId '$ObjectId'."
+            $queryArgs.Add("ObjectId", $ObjectId)
         }
         
-        # 4. Add found snapshot IDs to the list for update
-        $foundSnapshotIds = $allDetailedSnapshots | ForEach-Object { $_.SnapshotId }
-        [void]$snapshotsToUpdate.AddRange($foundSnapshotIds) # Use [void] to suppress output
-    }
-    else {
-        Write-Host "No objects found matching the query criteria."
+        # 1. Get the list of objects
+        $foundObjects = Get-UnmanagedSnapshots @queryArgs
+        
+        if ($foundObjects -and $foundObjects.Count -gt 0) {
+            Write-Host "Successfully queried $($foundObjects.Count) object(s)."
+            
+            $summaryList = [System.Collections.ArrayList]::new()
+
+            # 2. Loop through each object and get its detailed snapshots
+            Write-Host "Now fetching detailed snapshots for each object..."
+            foreach ($object in $foundObjects) {
+                # Pass the parent object's UnmanagedStatus and Name to the snapshot function
+                $detailedSnapshots = Get-SnapshotsForObject -SnappableId $object.WorkloadId -Headers $headers -GraphQL_URL $GraphQL_URL -ParentUnmanagedStatus $object.UnmanagedStatus -ParentObjectName $object.Name
+                
+                $snapshotCount = 0
+                if ($detailedSnapshots -and $detailedSnapshots.Count -gt 0) {
+                    [void]$allDetailedSnapshots.AddRange(@($detailedSnapshots)) # Use [void] to suppress output
+                    $snapshotCount = $detailedSnapshots.Count
+                }
+                
+                # Add to summary
+                [void]$summaryList.Add([PSCustomObject]@{
+                    ObjectId = $object.ObjectId
+                    ObjectName = $object.Name
+                    UnmanagedStatus = $object.UnmanagedStatus
+                    SnapshotCount = $snapshotCount
+                })
+            }
+            Write-Host "Total detailed snapshots found: $($allDetailedSnapshots.Count)"
+
+            # --- Print Summary ---
+            Write-Host "`n--- Snapshot Query Summary ---" -ForegroundColor Green
+            $summaryList | Format-Table -AutoSize
+            Write-Host "------------------------------`n" -ForegroundColor Green
+
+
+            # 3. Export to CSV if path is provided
+            if ($PSBoundParameters.ContainsKey('ExportCsvPath') -and -not [string]::IsNullOrWhiteSpace($ExportCsvPath)) {
+                try {
+                    Write-Host "Exporting detailed snapshot list to '$ExportCsvPath'..."
+                    $allDetailedSnapshots | Export-Csv -Path $ExportCsvPath -NoTypeInformation -Encoding UTF8
+                    Write-Host "Export complete."
+                }
+                catch {
+                    Write-Error "Failed to export CSV file. Error: $($_)"
+                }
+            }
+            
+            # 4. Add found snapshot IDs to the list for update
+            $foundSnapshotIds = $allDetailedSnapshots | ForEach-Object { $_.SnapshotId }
+            [void]$snapshotsToUpdate.AddRange($foundSnapshotIds) # Use [void] to suppress output
+        }
+        else {
+            Write-Host "No objects found matching the query criteria."
+        }
     }
 }
+
 
 # Check if there is anything to update
 if ($snapshotsToUpdate.Count -eq 0) {
