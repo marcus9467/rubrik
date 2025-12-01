@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-This script updates the retention SLA for a list of specified Rubrik snapshots.
-It can either query for snapshots and export them, or import a previously exported CSV to perform the update.
+This script updates the retention SLA for a list of specified Rubrik snapshots OR deletes them.
+It can either query for snapshots and export them, or import a previously exported CSV to perform the update/deletion.
 
 .EXAMPLE
 # Example 1: Update retention for manually specified snapshot IDs
@@ -12,25 +12,18 @@ It can either query for snapshots and export them, or import a previously export
 ./Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -NewSlaId "sla-id-123" -ObjectId "obj-id-789" -ClusterUuid "cluster-uuid-abc" -FilterRetentionSlaDomainIds "sla-abc" -ExportCsvPath "C:\temp\all_snapshots_for_review.csv" -UserNote "Bulk update per ticket #12345"
 
 .EXAMPLE
-# Example 3: Query for *all* objects on a cluster, get all snapshots, and just export to CSV (no update)
-./Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ClusterUuid "cluster-uuid-abc" -ExportCsvPath "C:\temp\all_cluster_snapshots.csv"
+# Example 3: DELETE snapshots from an imported CSV
+./Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ImportCsvPath "C:\temp\snapshots_to_delete.csv" -DeleteSnapshots
 
 .EXAMPLE
 # Example 4: Query for *only relic* objects on a cluster, get all their snapshots, and export to CSV
 ./Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ClusterUuid "cluster-uuid-abc" -RelicObjectsOnly -ExportCsvPath "C:\temp\relic_snapshots.csv"
 
-.EXAMPLE
-# Example 5: Import a manually reviewed CSV and apply a new SLA to only the snapshots listed in the file.
-# This is the recommended safe workflow for bulk updates.
-# Step 1 (Export): .\Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -ClusterUuid "cluster-uuid-abc" -ExportCsvPath "C:\temp\review_snapshots.csv"
-# Step 2 (Manual): Manually edit "review_snapshots.csv" and remove any rows you do not want to update.
-# Step 3 (Import & Update): .\Update-SnapshotRetention.ps1 -ServiceAccountJson "C:\scripts\ServiceAccount.json" -NewSlaId "sla-id-123" -ImportCsvPath "C:\temp\review_snapshots.csv" -UserNote "Bulk update per ticket #12345"
-
 .NOTES
     Author  : Marcus Henderson <marcus.henderson@rubrik.com>
     Adapted : November 6, 2025
     Company : Rubrik Inc
-    Purpose : Framework for bulk snapshot SLA retention updates.
+    Purpose : Framework for bulk snapshot SLA retention updates or deletion.
 #>
 
 [cmdletbinding()]
@@ -38,7 +31,7 @@ param (
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
 
-    [parameter(Mandatory=$false)] # Changed from Mandatory=$true
+    [parameter(Mandatory=$false)]
     [string]$NewSlaId,
 
     [parameter(Mandatory=$false)]
@@ -76,7 +69,11 @@ param (
 
     # Optional note for the retention change
     [parameter(Mandatory=$false)]
-    [string]$UserNote = ""
+    [string]$UserNote = "",
+
+    # NEW: Switch to enable deletion mode
+    [parameter(Mandatory=$false)]
+    [switch]$DeleteSnapshots
 )
 
 # --- Function Definitions ---
@@ -164,7 +161,7 @@ function Get-UnmanagedSnapshots {
         [parameter(Mandatory=$true)]
         [string]$ClusterUuid,
 
-        [parameter(Mandatory=$false)] # Changed from Mandatory=true and removed ValidateNotNullOrEmpty
+        [parameter(Mandatory=$false)] 
         [string[]]$GUS_RetentionSlaDomainIds = @(),
 
         [parameter(Mandatory=$false)]
@@ -887,6 +884,61 @@ function Set-SnapshotRetention {
     }
 }
 
+function Remove-UnmanagedSnapshots {
+    # Deletes the specified snapshot(s).
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory=$true)]
+        [string[]]$SnapshotIds, # Accepts array of IDs
+
+        [parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+
+        [parameter(Mandatory=$true)]
+        [string]$GraphQL_URL
+    )
+
+    process {
+        Write-Host "Attempting to DELETE $( $SnapshotIds.Count ) snapshot(s)..."
+
+        $query = "mutation DeleteUnmanagedSnapshotsMutation(`$input: DeleteUnmanagedSnapshotsInput!) {
+          deleteUnmanagedSnapshots(input: `$input) {
+            success
+            __typename
+          }
+        }"
+
+        $variables = @{
+            "input" = @{
+                "snapshotIds" = $SnapshotIds
+            }
+        }
+        
+        $JSON_BODY = @{
+            "variables" = $variables
+            "query" = $query
+        } | ConvertTo-Json -Depth 5
+        
+        try {
+           $result = Invoke-WebRequest -Uri $GraphQL_URL -Method POST -Headers $Headers -Body $JSON_BODY
+           $data = $result.Content | ConvertFrom-Json
+           
+           if ($data.errors) {
+                Write-Error "  GraphQL returned an error during deletion: $($data.errors | ConvertTo-Json -Depth 5)"
+           }
+           elseif ($data.data.deleteUnmanagedSnapshots -and $data.data.deleteUnmanagedSnapshots.success) {
+               Write-Host "  Successfully requested deletion for $( $SnapshotIds -join ', ' )." -ForegroundColor Green
+           }
+           else {
+               Write-Warning "  Failed to delete snapshot(s). API success was not true or response was unexpected."
+           }
+        }
+        catch {
+           Write-Error "  Failed to submit deletion request. Error: $($_)"
+        }
+    }
+}
+
 # --- Main Script Logic ---
 
 # Read and parse the service account file
@@ -917,6 +969,14 @@ $LogoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "sess
 
 Write-Host "Authentication successful."
 
+# VALIDATION: Check for conflicting operations
+if ($PSBoundParameters.ContainsKey('NewSlaId') -and $DeleteSnapshots) {
+    Write-Error "CONFLICT: You specified both -NewSlaId (Update Retention) and -DeleteSnapshots (Delete). You cannot perform both actions at the same time."
+    Disconnect-Polaris -Headers $headers -LogoutUrl $LogoutUrl
+    return
+}
+
+
 $snapshotsToUpdate = [System.Collections.ArrayList]::new() # Changed to ArrayList
 $allDetailedSnapshots = [System.Collections.ArrayList]::new() # Changed to ArrayList
 
@@ -924,8 +984,12 @@ $allDetailedSnapshots = [System.Collections.ArrayList]::new() # Changed to Array
 if ($PSBoundParameters.ContainsKey('ImportCsvPath') -and -not [string]::IsNullOrWhiteSpace($ImportCsvPath)) {
     Write-Host "Importing snapshots from CSV at '$ImportCsvPath'..."
     
-    if (-not ($PSBoundParameters.ContainsKey('NewSlaId') -and -not [string]::IsNullOrWhiteSpace($NewSlaId))) {
-        Write-Error "Using -ImportCsvPath requires the -NewSlaId parameter to be specified."
+    # Validation logic depends on whether we are deleting or updating
+    if ($DeleteSnapshots) {
+         Write-Host "Mode: Deletion via CSV Import." -ForegroundColor Yellow
+    }
+    elseif (-not ($PSBoundParameters.ContainsKey('NewSlaId') -and -not [string]::IsNullOrWhiteSpace($NewSlaId))) {
+        Write-Error "Using -ImportCsvPath requires either the -NewSlaId parameter (for retention updates) or the -DeleteSnapshots switch."
         Disconnect-Polaris -Headers $headers -LogoutUrl $LogoutUrl
         return
     }
@@ -1043,14 +1107,29 @@ else {
 
 # Check if there is anything to update
 if ($snapshotsToUpdate.Count -eq 0) {
-    Write-Warning "No snapshot IDs were provided or found. Nothing to update. Exiting."
+    Write-Warning "No snapshot IDs were provided or found. Nothing to update or delete. Exiting."
 }
 else {
     # De-duplicate the list
     $uniqueSnapshotIds = $snapshotsToUpdate | Sort-Object -Unique
     
-    if ($PSBoundParameters.ContainsKey('NewSlaId') -and -not [string]::IsNullOrWhiteSpace($NewSlaId)) {
-        Write-Host "Starting snapshot update process for $($uniqueSnapshotIds.Count) unique snapshot(s)..."
+    # --- LOGIC BRANCH: DELETE or UPDATE ---
+    
+    if ($DeleteSnapshots) {
+        Write-Host "----------------------------------------------------------------" -ForegroundColor Red
+        Write-Host "WARNING: DELETION MODE ENABLED" -ForegroundColor Red
+        Write-Host "Preparing to DELETE $($uniqueSnapshotIds.Count) unique snapshot(s)." -ForegroundColor Red
+        Write-Host "----------------------------------------------------------------" -ForegroundColor Red
+        
+        # NOTE: Processing one-by-one (or batches of 1) in the loop to maintain consistent logging with the rest of the script,
+        # but the function technically supports batches if performance becomes an issue later.
+        foreach ($snapshotId in $uniqueSnapshotIds) {
+            Remove-UnmanagedSnapshots -SnapshotIds @($snapshotId) -Headers $headers -GraphQL_URL $GraphQL_URL
+        }
+        Write-Host "Deletion process complete."
+    }
+    elseif ($PSBoundParameters.ContainsKey('NewSlaId') -and -not [string]::IsNullOrWhiteSpace($NewSlaId)) {
+        Write-Host "Starting snapshot UPDATE process for $($uniqueSnapshotIds.Count) unique snapshot(s)..."
 
         # Loop through each snapshot and apply the new SLA
         foreach ($snapshotId in $uniqueSnapshotIds) {
@@ -1060,9 +1139,9 @@ else {
         Write-Host "All snapshot updates submitted."
     }
     else {
-        Write-Host "Snapshots were found, but -NewSlaId was not provided. Skipping retention update."
+        Write-Host "Snapshots were found, but neither -NewSlaId (Update) nor -DeleteSnapshots (Delete) were provided."
         if (-not $PSBoundParameters.ContainsKey('ExportCsvPath')) {
-            Write-Warning "You did not specify -NewSlaId or -ExportCsvPath, so no action was taken on the found snapshots."
+            Write-Warning "You did not specify -NewSlaId, -DeleteSnapshots or -ExportCsvPath, so no action was taken on the found snapshots."
         }
     }
 }
