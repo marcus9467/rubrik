@@ -1,6 +1,6 @@
  <#
 .SYNOPSIS
-    Meditech Backup & Rubrik Snapshot Orchestration Script. For use with Meditech Expanse in GCP.
+    Meditech Backup & Rubrik Snapshot Orchestration Script
 .DESCRIPTION
     Orchestrates the backup workflow for Meditech on GCP using Rubrik Security Cloud (RSC).
     1. Authenticates to RSC.
@@ -10,39 +10,88 @@
     5. Triggers Rubrik Bulk Snapshot (Mutation) for the discovered VMs.
     6. Unquiesces Meditech immediately.
 .EXAMPLE
+    # Backup Mode
     .\MeditechMasterWorkflow.ps1 `
-        -ServiceAccountJson "C:\creds\rsc_service_account.json" `
+        -ServiceAccountJson "rsc_service_account.json" `
         -RetentionSlaId "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" `
-        -MbfUser "ISB" `
-        -MbfPassword "Secret" `
-        -MbfIntermediary "RUB-MBI:2987"
-.NOTES
-    Author  : Marcus Henderson <marcus.henderson@rubrik.com>
-    Created : January 2026
-    Company : Rubrik Inc
+        -MbfUser "mbfUser" `
+        -MbfPassword "mbfSecret" `
+        -MbfIntermediary "MasterServer:XXXX"
+         >>> Step 1: Connecting to Rubrik Security Cloud...
+    >>> Step 2: Running Meditech Census to identify targets...
+        [RAW MBF CENSUS OUTPUT]
+          MEDITECH Backup Facilitator Version 1.7.3.0
+          Copyright (C) 2011-2019 Medical Information Technology, Inc.
+          Server1:Server1 E=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|,
+          Server2:Server2 E=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|,
+          ...
+        [END RAW OUTPUT]
+        Census identified 2 unique host(s): RUB-MATFS, RUB-NPRFS
+        Fetching RSC Inventory...
+        Resolved X VM(s) to snapshot.
+    >>> Step 3: Quiescing Meditech...
+        [RAW MBF QUIESCE OUTPUT]
+          MEDITECH Backup Facilitator Version 1.7.3.0
+          Copyright (C) 2011-2019 Medical Information Technology, Inc.
+          Server1=SUCCESS,
+          Server2=SUCCESS,
+          ...
+        [END RAW OUTPUT]
+        Quiesce Successful (Code 0).
+    >>> Step 4: Initiating Rubrik Snapshots...
+        Snapshot Request Complete.
+        Wall Clock Time: 0 ms
+        Server Exec Time: 0 ms
+    >>> Step 5: Unquiescing Meditech...
+        [RAW MBF UNQUIESCE OUTPUT]
+          MEDITECH Backup Facilitator Version 1.7.3.0
+          Copyright (C) 2011-2019 Medical Information Technology, Inc.
+          Server1=SUCCESS,
+          Server2=SUCCESS,
+          ...
+        [END RAW OUTPUT]
+        Unquiesce Successful.
+    >>> Step 6: Disconnecting... 
+.EXAMPLE
+    # List SLAs Mode
+    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "rsc_service_account.json" -ListSlas
+    >>> Step 1: Connecting to Rubrik Security Cloud...
+    >>> List Mode: Retrieving SLA Domains via GraphQL...
+
+    name            id                                  
+    ----            --                                  
+    Bronze          00000000-0000-0000-0000-000000000002
+    custom-sla-1    166ea5f4-c504-4eec-8740-c80c29128e57
+    Gold            00000000-0000-0000-0000-000000000000
+    Silver          00000000-0000-0000-0000-000000000001
 #>
-[cmdletbinding()]
+[cmdletbinding(DefaultParameterSetName = "RunBackup")]
 param (
-    # RSC Parameters
+    # Common Parameters
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
 
-    # Removed -GceInstanceIds as we now use Census for discovery
+    # List Mode Switch
+    [Parameter(ParameterSetName = "ListSlas", Mandatory=$true)]
+    [switch]$ListSlas,
 
-    [parameter(Mandatory=$true)]
+    # Backup Mode Parameters
+    [parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string]$RetentionSlaId,
 
-    # MBF Parameters
-    [Parameter(Mandatory=$true)]
+    [Parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string]$MbfUser,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string]$MbfPassword,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string[]]$MbfIntermediary,
 
+    [Parameter(ParameterSetName = "RunBackup")]
     [string]$MbfPath = "C:\Program Files (x86)\MEDITECH\MBI\mbf.exe",
+
+    [Parameter(ParameterSetName = "RunBackup")]
     [int]$MbfTimeout = 90
 )
 
@@ -229,7 +278,7 @@ function Invoke-MbfUnquiesce {
 }
 
 # -----------------------------------------------------------------------------
-# Rubrik Security Cloud Functions
+# RSC FUNCTIONS
 # -----------------------------------------------------------------------------
 
 function Connect-Rsc {
@@ -273,6 +322,66 @@ function Disconnect-Rsc {
     catch {
         Write-Warning "Logout failed (session may have already expired): $_"
     }
+}
+
+function Get-RscSlaDomains {
+    [CmdletBinding()]
+    param(
+        [string]$ApiEndpoint,
+        [hashtable]$Headers
+    )
+    
+    # GraphQL Query for listing SLAs (Filtered for just ID and Name to simplify)
+    # UPDATED: Removed unused variables to pass validation
+    $query = @"
+query SLAListQuery(`$after: String, `$first: Int, `$filter: [GlobalSlaFilterInput!], `$sortBy: SlaQuerySortByField, `$sortOrder: SortOrder, `$shouldShowProtectedObjectCount: Boolean, `$shouldShowPausedClusters: Boolean = false) {
+  slaDomains(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, shouldShowProtectedObjectCount: `$shouldShowProtectedObjectCount, shouldShowPausedClusters: `$shouldShowPausedClusters) {
+    edges {
+      node {
+        name
+        id
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"@
+    
+    $variables = @{
+        "after"                                    = $null
+        "first"                                    = 50
+        "filter"                                   = @()
+        "sortBy"                                   = "NAME"
+        "sortOrder"                                = "ASC"
+        "shouldShowProtectedObjectCount"           = $true
+        "shouldShowPausedClusters"                 = $true
+    }
+    
+    $allSlas = @()
+    $hasNextPage = $true
+    
+    while ($hasNextPage) {
+        $payload = @{ query = $query; variables = $variables }
+        
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri $ApiEndpoint -Headers $Headers -Body ($payload | ConvertTo-Json -Depth 5) -ContentType "application/json"
+        }
+        catch {
+            Throw "Failed to retrieve SLA domains via GraphQL: $_"
+        }
+
+        if ($response.data.slaDomains.edges.node) {
+            $allSlas += $response.data.slaDomains.edges.node
+        }
+        
+        $hasNextPage = $response.data.slaDomains.pageInfo.hasNextPage
+        if ($hasNextPage) { $variables.after = $response.data.slaDomains.pageInfo.endCursor }
+    }
+    
+    return $allSlas | Select-Object name, id | Sort-Object name
 }
 
 function Get-RscGcpInventory {
@@ -389,9 +498,26 @@ try {
     }
     
     # Extract API URL hostname from token URI (e.g., https://mycluster.rubrik.com/...)
-    $baseUri = $serviceAccountObj.access_token_uri -replace "/.*", "" 
+    # Usually access_token_uri is like https://foo.my.rubrik.com/api/client_token
+    # We need https://foo.my.rubrik.com/api/graphql
     $uriParts = $serviceAccountObj.access_token_uri -split "/"
-    $graphqlUrl = "https://$($uriParts[2])/api/graphql"
+    $rscHost = $uriParts[2]
+    $graphqlUrl = "https://$rscHost/api/graphql"
+    $restBaseUrl = "https://$rscHost"
+
+    # --- CHECK FOR LIST MODE ---
+    if ($PSCmdlet.ParameterSetName -eq "ListSlas") {
+        Write-Host ">>> List Mode: Retrieving SLA Domains via GraphQL..." -ForegroundColor Cyan
+        $slas = Get-RscSlaDomains -ApiEndpoint $graphqlUrl -Headers $rscHeaders
+        if ($slas) {
+            $slas | Format-Table -AutoSize
+            Write-Host "SLA List Complete." -ForegroundColor Green
+        } else {
+            Write-Warning "No SLAs found or permission denied."
+        }
+        # Exit script cleanly
+        return 
+    }
 
     # 2. DISCOVERY: CENSUS & INVENTORY
     Write-Host ">>> Step 2: Running Meditech Census to identify targets..." -ForegroundColor Cyan
@@ -403,6 +529,7 @@ try {
         -PathToMBF $MbfPath `
         -Timeout $MbfTimeout
 
+    # PRINT RAW OUTPUT FOR DEBUG/LOGGING
     Write-Host "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
     $censusResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
     Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
@@ -419,10 +546,12 @@ try {
     $inventory = Get-RscGcpInventory -ApiEndpoint $graphqlUrl -Headers $rscHeaders
     
     # Match Census Hosts to RSC Inventory (Case-insensitive match on Native Name)
+    # We filter the Inventory to only include objects where 'nativeName' is in our $meditechHosts list
     $targetWorkloads = $inventory | Where-Object { 
         $meditechHosts -contains $_.nativeName 
     }
 
+    # Verification: Did we find all servers?
     $foundHosts = $targetWorkloads.nativeName
     $missingHosts = $meditechHosts | Where-Object { $foundHosts -notcontains $_ }
     
@@ -453,6 +582,7 @@ try {
     Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
 
     if (-not $quiesceResult.ReadyToSnap) {
+        # CRITICAL FAILURE PATH
         Write-Error "Quiesce Failed (Exit Code: $($quiesceResult.ExitCode))."
         
         if ($quiesceResult.ExitCode -eq 2) {
@@ -464,7 +594,7 @@ try {
 
     Write-Host "    Quiesce Successful (Code $($quiesceResult.ExitCode))." -ForegroundColor Green
 
-    # 4. SNAPSHOT 
+    # 4. SNAPSHOT (CRITICAL TIMING)
     Write-Host ">>> Step 4: Initiating Rubrik Snapshots..." -ForegroundColor Yellow
     try {
         $snapResult = New-RscGcpSnapshot `
@@ -479,9 +609,10 @@ try {
     }
     catch {
         Write-Error "Snapshot failed! $_"
+        # Continue to unquiesce regardless of snapshot failure
     }
 
-    # 5. UNQUIESCE 
+    # 5. UNQUIESCE (IMMEDIATE)
     Write-Host ">>> Step 5: Unquiescing Meditech..." -ForegroundColor Yellow
     $uqResult = Invoke-MbfUnquiesce `
         -User $MbfUser `
@@ -508,6 +639,8 @@ finally {
     # 6. DISCONNECT
     if ($rscHeaders) {
         Write-Host ">>> Step 6: Disconnecting..." -ForegroundColor DarkGray
+        # Construct logout URL roughly based on token URI pattern, or skip if not strictly required by API
+        # Many JWT implementations don't strictly require server-side logout, but good practice if endpoint exists.
         Disconnect-Rsc -Headers $rscHeaders
     }
 } 
