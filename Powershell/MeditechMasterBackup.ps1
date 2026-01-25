@@ -13,6 +13,7 @@
     # Backup Mode
     .\MeditechMasterWorkflow.ps1 `
         -ServiceAccountJson "rsc_service_account.json" `
+        -GcpProjectId "12345-rubrik-id" `
         -RetentionSlaId "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" `
         -MbfUser "mbfUser" `
         -MbfPassword "mbfSecret" `
@@ -54,16 +55,28 @@
     >>> Step 6: Disconnecting... 
 .EXAMPLE
     # List SLAs Mode
-    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "rsc_service_account.json" -ListSlas
+    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "C:\creds\rsc_service_account.json" -ListSlas
     >>> Step 1: Connecting to Rubrik Security Cloud...
     >>> List Mode: Retrieving SLA Domains via GraphQL...
 
     name            id                                  
     ----            --                                  
     Bronze          00000000-0000-0000-0000-000000000002
-    custom-sla-1    166ea5f4-c504-4eec-8740-c80c29128e57
+    custom-sla-1    00000000-0000-0000-0000-000000000003
     Gold            00000000-0000-0000-0000-000000000000
     Silver          00000000-0000-0000-0000-000000000001
+
+.EXAMPLE
+    # List Projects Mode
+    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "C:\creds\rsc_service_account.json" -ListProjects
+     >>> Step 1: Connecting to Rubrik Security Cloud...
+    >>> List Mode: Retrieving GCP Projects via GraphQL...
+
+    Project Name                  GCP Native ID                 RSC Project ID                      
+    ------------                  -------------                 --------------                      
+    gcp-rbrkdev-cnp               gcp-rbrkdev-cnp               00000000-0000-0000-0000-000000000000
+    gcp-rubrikcom-cnp             gcp-rubrikcom-cnp             00000000-0000-0000-0000-000000000001
+
 #>
 [cmdletbinding(DefaultParameterSetName = "RunBackup")]
 param (
@@ -71,13 +84,19 @@ param (
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
 
-    # List Mode Switch
+    # List Mode Switches
     [Parameter(ParameterSetName = "ListSlas", Mandatory=$true)]
     [switch]$ListSlas,
+
+    [Parameter(ParameterSetName = "ListProjects", Mandatory=$true)]
+    [switch]$ListProjects,
 
     # Backup Mode Parameters
     [parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string]$RetentionSlaId,
+
+    [parameter(ParameterSetName = "RunBackup", Mandatory=$false)]
+    [string]$GcpProjectId, # Optional filter for inventory
 
     [Parameter(ParameterSetName = "RunBackup", Mandatory=$true)]
     [string]$MbfUser,
@@ -109,10 +128,7 @@ function Invoke-MbfCommand {
         Throw "MBF Executable not found at $ExecutablePath"
     }
 
-    # Set Working Directory (Essential for older binaries relying on local config/DLLs)
     $workDir = Split-Path -Parent $ExecutablePath
-    
-    # Construct proper argument string
     $processArgs = $ArgumentList -join " "
     
     Write-Verbose "Executing: $ExecutablePath $processArgs"
@@ -131,7 +147,6 @@ function Invoke-MbfCommand {
     $p.StartInfo = $pinfo
     $p.Start() | Out-Null
     
-    # Read streams BEFORE waiting for exit to prevent deadlocks
     $output = $p.StandardOutput.ReadToEnd()
     $err = $p.StandardError.ReadToEnd()
     
@@ -174,7 +189,6 @@ function Invoke-MbfCensus {
     $lunObjects = @()
     foreach ($line in $result.Output) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        # Regex: Server:Drive=Serial|WWN (Permissive)
         if ($line -match "^(.+?):(.+?)[=\s]+([^|]*)\|?(.*?),?\s*$") {
             $lunObjects += [PSCustomObject]@{
                 Server    = $matches[1].Trim()
@@ -330,9 +344,6 @@ function Get-RscSlaDomains {
         [string]$ApiEndpoint,
         [hashtable]$Headers
     )
-    
-    # GraphQL Query for listing SLAs (Filtered for just ID and Name to simplify)
-    # UPDATED: Removed unused variables to pass validation
     $query = @"
 query SLAListQuery(`$after: String, `$first: Int, `$filter: [GlobalSlaFilterInput!], `$sortBy: SlaQuerySortByField, `$sortOrder: SortOrder, `$shouldShowProtectedObjectCount: Boolean, `$shouldShowPausedClusters: Boolean = false) {
   slaDomains(after: `$after, first: `$first, filter: `$filter, sortBy: `$sortBy, sortOrder: `$sortOrder, shouldShowProtectedObjectCount: `$shouldShowProtectedObjectCount, shouldShowPausedClusters: `$shouldShowPausedClusters) {
@@ -384,11 +395,70 @@ query SLAListQuery(`$after: String, `$first: Int, `$filter: [GlobalSlaFilterInpu
     return $allSlas | Select-Object name, id | Sort-Object name
 }
 
-function Get-RscGcpInventory {
+function Get-RscGcpProjects {
     [CmdletBinding()]
     param(
         [string]$ApiEndpoint,
         [hashtable]$Headers
+    )
+
+    $query = @"
+query GCloudProjectsListQuery(`$first: Int!, `$after: String, `$sortBy: GcpNativeProjectSortFields, `$sortOrder: SortOrder!, `$filters: GcpNativeProjectFilters) {
+  gcpNativeProjects(first: `$first, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder, projectFilters: `$filters) {
+    edges {
+      node {
+        id
+        name
+        nativeId
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"@
+    $variables = @{
+        "first"     = 50
+        "sortBy"    = "NAME"
+        "sortOrder" = "ASC"
+        "filters"   = @{ 
+            "effectiveSlaFilter" = $null
+            "nameOrNumberSubstringFilter" = $null 
+        }
+    }
+
+    $allProjects = @()
+    $hasNextPage = $true
+
+    while ($hasNextPage) {
+        $payload = @{ query = $query; variables = $variables }
+        
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri $ApiEndpoint -Headers $Headers -Body ($payload | ConvertTo-Json -Depth 5) -ContentType "application/json"
+        }
+        catch {
+            Throw "Failed to retrieve GCP Projects: $_"
+        }
+
+        if ($response.data.gcpNativeProjects.edges.node) {
+            $allProjects += $response.data.gcpNativeProjects.edges.node
+        }
+        
+        $hasNextPage = $response.data.gcpNativeProjects.pageInfo.hasNextPage
+        if ($hasNextPage) { $variables.after = $response.data.gcpNativeProjects.pageInfo.endCursor }
+    }
+
+    return $allProjects | Select-Object name, nativeId, id | Sort-Object name
+}
+
+function Get-RscGcpInventory {
+    [CmdletBinding()]
+    param(
+        [string]$ApiEndpoint,
+        [hashtable]$Headers,
+        [string]$GcpProjectId = $null
     )
 
     $query = @"
@@ -408,20 +478,33 @@ query GCPInstancesListQuery(`$first: Int, `$after: String, `$filters: GcpNativeG
   }
 }
 "@
-    # Reduced variables to minimal requirement for ID resolution
+    
+    $filterObj = @{ "relicFilter" = @{ "relic" = $false } }
+    
+    if (-not [string]::IsNullOrEmpty($GcpProjectId)) {
+        $filterObj["projectFilter"] = @{ "projectIds" = @($GcpProjectId) }
+    }
+
     $variables = @{
         "first"   = 50
-        "filters" = @{ "relicFilter" = @{ "relic" = $false } }
+        "filters" = $filterObj
     }
 
     $allInstances = @()
     $hasNextPage = $true
 
     Write-Verbose "Fetching RSC Inventory..."
+    if ($GcpProjectId) { Write-Verbose "  Filtering by Project ID: $GcpProjectId" }
+
     while ($hasNextPage) {
         $payload = @{ query = $query; variables = $variables }
         $response = Invoke-RestMethod -Method Post -Uri $ApiEndpoint -Headers $Headers -Body ($payload | ConvertTo-Json -Depth 5) -ContentType "application/json"
         
+        # Error handling for invalid filters
+        if ($response.errors) {
+            Throw "GraphQL Error: $($response.errors.message)"
+        }
+
         if ($response.data.gcpNativeGceInstances.edges.node) {
             $allInstances += $response.data.gcpNativeGceInstances.edges.node
         }
@@ -496,16 +579,12 @@ try {
         "Authorization" = "Bearer $($tokenInfo.access_token)"
         "Content-Type"  = "application/json"
     }
-    
-    # Extract API URL hostname from token URI (e.g., https://mycluster.rubrik.com/...)
-    # Usually access_token_uri is like https://foo.my.rubrik.com/api/client_token
-    # We need https://foo.my.rubrik.com/api/graphql
     $uriParts = $serviceAccountObj.access_token_uri -split "/"
     $rscHost = $uriParts[2]
     $graphqlUrl = "https://$rscHost/api/graphql"
     $restBaseUrl = "https://$rscHost"
 
-    # --- CHECK FOR LIST MODE ---
+    # --- CHECK FOR LIST MODE: SLAs ---
     if ($PSCmdlet.ParameterSetName -eq "ListSlas") {
         Write-Host ">>> List Mode: Retrieving SLA Domains via GraphQL..." -ForegroundColor Cyan
         $slas = Get-RscSlaDomains -ApiEndpoint $graphqlUrl -Headers $rscHeaders
@@ -515,8 +594,20 @@ try {
         } else {
             Write-Warning "No SLAs found or permission denied."
         }
-        # Exit script cleanly
         return 
+    }
+
+    # --- CHECK FOR LIST MODE: PROJECTS ---
+    if ($PSCmdlet.ParameterSetName -eq "ListProjects") {
+        Write-Host ">>> List Mode: Retrieving GCP Projects via GraphQL..." -ForegroundColor Cyan
+        $projects = Get-RscGcpProjects -ApiEndpoint $graphqlUrl -Headers $rscHeaders
+        if ($projects) {
+            $projects | Select-Object @{N='Project Name';E={$_.name}}, @{N='GCP Native ID';E={$_.nativeId}}, @{N='RSC Project ID';E={$_.id}} | Format-Table -AutoSize
+            Write-Host "Project List Complete." -ForegroundColor Green
+        } else {
+            Write-Warning "No GCP Projects found."
+        }
+        return
     }
 
     # 2. DISCOVERY: CENSUS & INVENTORY
@@ -538,20 +629,19 @@ try {
         Throw "Meditech Census returned no LUNs/Servers. Check MBF configuration or connectivity."
     }
 
-    # Extract unique server names from Census (Case-insensitive)
+    # Extract unique servers from Census (Case-insensitive)
     $meditechHosts = $censusResult.Luns.Server | Select-Object -Unique
     Write-Host "    Census identified $($meditechHosts.Count) unique host(s): $($meditechHosts -join ', ')" -ForegroundColor Gray
 
     Write-Host "    Fetching RSC Inventory..." -ForegroundColor Cyan
-    $inventory = Get-RscGcpInventory -ApiEndpoint $graphqlUrl -Headers $rscHeaders
+    $inventory = Get-RscGcpInventory -ApiEndpoint $graphqlUrl -Headers $rscHeaders -GcpProjectId $GcpProjectId
     
-    # Match Census Hosts to RSC Inventory (Case-insensitive match on Native Name)
-    # We filter the Inventory to only include objects where 'nativeName' is in our $meditechHosts list
+    # Match Census to RSC Inventory 
     $targetWorkloads = $inventory | Where-Object { 
         $meditechHosts -contains $_.nativeName 
     }
 
-    # Verification: Did we find all servers?
+    # Verification
     $foundHosts = $targetWorkloads.nativeName
     $missingHosts = $meditechHosts | Where-Object { $foundHosts -notcontains $_ }
     
@@ -582,7 +672,6 @@ try {
     Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
 
     if (-not $quiesceResult.ReadyToSnap) {
-        # CRITICAL FAILURE PATH
         Write-Error "Quiesce Failed (Exit Code: $($quiesceResult.ExitCode))."
         
         if ($quiesceResult.ExitCode -eq 2) {
@@ -594,7 +683,7 @@ try {
 
     Write-Host "    Quiesce Successful (Code $($quiesceResult.ExitCode))." -ForegroundColor Green
 
-    # 4. SNAPSHOT (CRITICAL TIMING)
+    # 4. SNAPSHOT 
     Write-Host ">>> Step 4: Initiating Rubrik Snapshots..." -ForegroundColor Yellow
     try {
         $snapResult = New-RscGcpSnapshot `
@@ -609,10 +698,9 @@ try {
     }
     catch {
         Write-Error "Snapshot failed! $_"
-        # Continue to unquiesce regardless of snapshot failure
     }
 
-    # 5. UNQUIESCE (IMMEDIATE)
+    # 5. UNQUIESCE 
     Write-Host ">>> Step 5: Unquiescing Meditech..." -ForegroundColor Yellow
     $uqResult = Invoke-MbfUnquiesce `
         -User $MbfUser `
@@ -639,8 +727,6 @@ finally {
     # 6. DISCONNECT
     if ($rscHeaders) {
         Write-Host ">>> Step 6: Disconnecting..." -ForegroundColor DarkGray
-        # Construct logout URL roughly based on token URI pattern, or skip if not strictly required by API
-        # Many JWT implementations don't strictly require server-side logout, but good practice if endpoint exists.
         Disconnect-Rsc -Headers $rscHeaders
     }
 } 
