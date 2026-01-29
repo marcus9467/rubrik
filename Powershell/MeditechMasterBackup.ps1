@@ -7,7 +7,7 @@
     2. Runs MBF Census to dynamically discover active Meditech Servers.
     3. Fetches GCP Inventory and correlates with Census results.
     4. Quiesces Meditech via MBF.exe.
-    5. Triggers Rubrik Bulk Snapshot (Mutation) for the discovered VMs.
+    5. Triggers Rubrik Bulk Snapshot for the discovered VMs.
     6. Unquiesces Meditech immediately.
 .EXAMPLE
     # Backup Mode
@@ -236,6 +236,7 @@ function Invoke-MbfCensus {
     $lunObjects = @()
     foreach ($line in $result.Output) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        # Regex: Server:Drive=Serial|WWN (Permissive)
         if ($line -match "^(.+?):(.+?)[=\s]+([^|]*)\|?(.*?),?\s*$") {
             $lunObjects += [PSCustomObject]@{
                 Server    = $matches[1].Trim()
@@ -290,6 +291,7 @@ function Invoke-MbfQuiesce {
         }
     }
 
+    # Success criteria: Exit Code < 2 or Code 10 (Success with warnings)
     $isReadyForBackup = ($result.ExitCode -lt 2) -or ($result.ExitCode -eq 10)
 
     return [PSCustomObject]@{
@@ -621,6 +623,7 @@ $ErrorActionPreference = "Stop"
 $isQuiesced = $false
 
 try {
+    # --- CHECK FOR CENSUS ONLY MODE ---
     if ($PSCmdlet.ParameterSetName -eq "RunCensus") {
         Write-Host ">>> Running Census Only (No Backup, No RSC Connection)..." -ForegroundColor Cyan
         
@@ -656,11 +659,13 @@ try {
         "Authorization" = "Bearer $($tokenInfo.access_token)"
         "Content-Type"  = "application/json"
     }
+    
     $uriParts = $serviceAccountObj.access_token_uri -split "/"
     $rscHost = $uriParts[2]
     $graphqlUrl = "https://$rscHost/api/graphql"
     $restBaseUrl = "https://$rscHost"
 
+    # --- CHECK FOR LIST MODE: SLAs ---
     if ($PSCmdlet.ParameterSetName -eq "ListSlas") {
         Write-Host ">>> List Mode: Retrieving SLA Domains via GraphQL..." -ForegroundColor Cyan
         $slas = Get-RscSlaDomains -ApiEndpoint $graphqlUrl -Headers $rscHeaders
@@ -695,6 +700,7 @@ try {
         -PathToMBF $MbfPath `
         -Timeout $MbfTimeout
 
+    # PRINT RAW OUTPUT FOR DEBUG/LOGGING
     Write-Host "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
     $censusResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
     Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
@@ -703,6 +709,7 @@ try {
         Throw "Meditech Census returned no LUNs/Servers. Check MBF configuration or connectivity."
     }
 
+    # Extract unique server names from Census (Case-insensitive)
     $meditechHosts = $censusResult.Luns.Server | Select-Object -Unique
     Write-Host "    Census identified $($meditechHosts.Count) unique host(s): $($meditechHosts -join ', ')" -ForegroundColor Gray
 
@@ -735,6 +742,10 @@ try {
     # 3. QUIESCE MEDITECH
     Write-Host ">>> Step 3: Quiescing Meditech..." -ForegroundColor Yellow
     
+    if ($Force) {
+        Write-Host "    [FORCE MODE ACTIVE]: Attempting Quiesce with M=force..." -ForegroundColor Magenta
+    }
+
     $quiesceResult = Invoke-MbfQuiesce `
         -User $MbfUser `
         -Password $MbfPassword `
@@ -801,6 +812,7 @@ try {
 
     if ($uqResult.ExitCode -lt 2) {
         Write-Host "    Unquiesce Successful." -ForegroundColor Green
+        # SAFETY FLAG OFF: System is thawed
         $isQuiesced = $false
     } else {
         Write-Error "    Unquiesce Failed! (Code $($uqResult.ExitCode)). Check System Immediately."
@@ -836,4 +848,4 @@ finally {
         Write-Host ">>> Step 6: Disconnecting..." -ForegroundColor DarkGray
         Disconnect-Rsc -Headers $rscHeaders
     }
-}
+} 
