@@ -10,6 +10,10 @@
     5. Triggers Rubrik Bulk Snapshot for the discovered VMs.
     6. Unquiesces Meditech immediately.
 .EXAMPLE
+    # Backup Mode with Logging Enabled
+    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "C:\creds.json" -RetentionSlaId "uuid" -MbfUser "usr" -MbfPassword "pwd" -MbfIntermediary "host" -EnableLogging
+
+.EXAMPLE
     # Backup Mode
     .\MeditechMasterWorkflow.ps1 `
         -ServiceAccountJson "C:\creds\rsc_service_account.json" `
@@ -155,8 +159,67 @@ param (
 
     [Parameter(ParameterSetName = "RunBackup")]
     [Parameter(ParameterSetName = "RunCensus")]
-    [int]$MbfTimeout = 90
+    [int]$MbfTimeout = 90,
+
+    # Logging Parameters
+    [Parameter()]
+    [switch]$EnableLogging,
+
+    [Parameter()]
+    [string]$LogPath = "C:\ProgramData\Rubrik\Logs\MeditechBackup.log"
 )
+
+# -----------------------------------------------------------------------------
+# LOGGING HELPER FUNCTIONS
+# -----------------------------------------------------------------------------
+
+function Get-Timestamp {
+    return Get-Date -Format "yyyy-dd-MM-HH:mm:ss"
+}
+
+function Write-Log {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [string]$Message,
+        
+        [Parameter(Position=1)]
+        [ConsoleColor]$ForegroundColor,
+        
+        [string]$Level = "INFO" # INFO, WARNING, ERROR
+    )
+    
+    $ts = Get-Timestamp
+    
+    # 1. File Output
+    if ($script:EnableLogging -and $script:LogPath) {
+        $logLine = "[$ts] [$Level] $Message"
+        try {
+            Add-Content -Path $script:LogPath -Value $logLine -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
+    
+    # 2. Console Output
+    switch ($Level) {
+        "INFO" {
+            $consoleMsg = "[$ts] $Message"
+            if ($ForegroundColor) {
+                Write-Host $consoleMsg -ForegroundColor $ForegroundColor
+            } else {
+                Write-Host $consoleMsg
+            }
+        }
+        "WARNING" {
+            # Write-Warning automatically adds "WARNING: " prefix and yellow color
+            Write-Warning "[$ts] $Message"
+        }
+        "ERROR" {
+            # Write-Error automatically adds error stream formatting
+            Write-Error "[$ts] $Message"
+        }
+    }
+}
 
 # -----------------------------------------------------------------------------
 # INTERNAL HELPER FUNCTIONS (MBF)
@@ -199,7 +262,7 @@ function Invoke-MbfCommand {
     $exitCode = $p.ExitCode
 
     if ($err) {
-        Write-Warning "MBF StdErr: $err"
+        Write-Log "MBF StdErr: $err" -Level Warning
     }
     
     return @{
@@ -386,7 +449,7 @@ function Disconnect-Rsc {
         }
     }
     catch {
-        Write-Warning "Logout failed (session may have already expired): $_"
+        Write-Log "Logout failed (session may have already expired): $_" -Level Warning
     }
 }
 
@@ -415,13 +478,13 @@ query SLAListQuery(`$after: String, `$first: Int, `$filter: [GlobalSlaFilterInpu
 "@
     
     $variables = @{
-        "after"                                    = $null
-        "first"                                    = 50
-        "filter"                                   = @()
-        "sortBy"                                   = "NAME"
-        "sortOrder"                                = "ASC"
-        "shouldShowProtectedObjectCount"           = $true
-        "shouldShowPausedClusters"                 = $true
+        "after"                          = $null
+        "first"                          = 50
+        "filter"                         = @()
+        "sortBy"                         = "NAME"
+        "sortOrder"                      = "ASC"
+        "shouldShowProtectedObjectCount" = $true
+        "shouldShowPausedClusters"       = $true
     }
     
     $allSlas = @()
@@ -619,13 +682,46 @@ mutation TakeOnDemandSnapshotSyncMutation(`$retentionSlaId: UUID!, `$snappableId
 # MAIN WORKFLOW EXECUTION
 # -----------------------------------------------------------------------------
 
+# --- LOGGING SETUP ---
+if ($EnableLogging) {
+    # 1. Ensure Directory Exists
+    $logDir = Split-Path -Parent $LogPath
+    if (-not (Test-Path $logDir)) {
+        try {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+            Write-Log "Created log directory: $logDir" -ForegroundColor DarkGray
+        } catch {
+            Write-Warning "Could not create log directory: $_"
+        }
+    }
+
+    # 2. Check Rotation (2MB Limit)
+    if (Test-Path $LogPath) {
+        $logFileItem = Get-Item $LogPath
+        # 2MB in bytes = 2 * 1024 * 1024 = 2097152
+        if ($logFileItem.Length -gt 2MB) {
+            $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+            $archiveName = "{0}_{1}{2}" -f $logFileItem.BaseName, $timestamp, $logFileItem.Extension
+            $archivePath = Join-Path $logDir $archiveName
+            
+            try {
+                Rename-Item -Path $LogPath -NewName $archiveName -Force
+                Write-Log "Log file rotated: $archiveName" -ForegroundColor DarkGray
+            } catch {
+                Write-Warning "Failed to rotate log file: $_"
+            }
+        }
+    }
+    
+}
+
 $ErrorActionPreference = "Stop"
 $isQuiesced = $false
 
 try {
     # --- CHECK FOR CENSUS ONLY MODE ---
     if ($PSCmdlet.ParameterSetName -eq "RunCensus") {
-        Write-Host ">>> Running Census Only (No Backup, No RSC Connection)..." -ForegroundColor Cyan
+        Write-Log ">>> Running Census Only (No Backup, No RSC Connection)..." -ForegroundColor Cyan
         
         $censusResult = Invoke-MbfCensus `
             -User $MbfUser `
@@ -635,21 +731,22 @@ try {
             -Timeout $MbfTimeout
 
         # PRINT RAW OUTPUT
-        Write-Host "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
-        $censusResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
-        Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
+        Write-Log "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
+        $censusResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
+        Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
 
         if ($censusResult.Luns.Count -gt 0) {
-            Write-Host "`nParsed LUNs/Servers:" -ForegroundColor Green
-            $censusResult.Luns | Format-Table -AutoSize
+            Write-Log "`nParsed LUNs/Servers:" -ForegroundColor Green
+            $lunTable = $censusResult.Luns | Format-Table -AutoSize | Out-String
+            Write-Log $lunTable
         } else {
-            Write-Warning "Census completed but returned no parsed LUNs."
+            Write-Log "Census completed but returned no parsed LUNs." -Level Warning
         }
         return
     }
 
     # 1. SETUP RSC CONNECTION
-    Write-Host ">>> Step 1: Connecting to Rubrik Security Cloud..." -ForegroundColor Cyan
+    Write-Log ">>> Step 1: Connecting to Rubrik Security Cloud..." -ForegroundColor Cyan
     if (-not (Test-Path $ServiceAccountJson)) { Throw "Service Account JSON not found." }
     
     $serviceAccountObj = Get-Content -Raw $ServiceAccountJson | ConvertFrom-Json
@@ -667,31 +764,33 @@ try {
 
     # --- CHECK FOR LIST MODE: SLAs ---
     if ($PSCmdlet.ParameterSetName -eq "ListSlas") {
-        Write-Host ">>> List Mode: Retrieving SLA Domains via GraphQL..." -ForegroundColor Cyan
+        Write-Log ">>> List Mode: Retrieving SLA Domains via GraphQL..." -ForegroundColor Cyan
         $slas = Get-RscSlaDomains -ApiEndpoint $graphqlUrl -Headers $rscHeaders
         if ($slas) {
-            $slas | Format-Table -AutoSize
-            Write-Host "SLA List Complete." -ForegroundColor Green
+            $slaTable = $slas | Format-Table -AutoSize | Out-String
+            Write-Log $slaTable
+            Write-Log "SLA List Complete." -ForegroundColor Green
         } else {
-            Write-Warning "No SLAs found or permission denied."
+            Write-Log "No SLAs found or permission denied." -Level Warning
         }
         return 
     }
 
     if ($PSCmdlet.ParameterSetName -eq "ListProjects") {
-        Write-Host ">>> List Mode: Retrieving GCP Projects via GraphQL..." -ForegroundColor Cyan
+        Write-Log ">>> List Mode: Retrieving GCP Projects via GraphQL..." -ForegroundColor Cyan
         $projects = Get-RscGcpProjects -ApiEndpoint $graphqlUrl -Headers $rscHeaders
         if ($projects) {
-            $projects | Select-Object @{N='Project Name';E={$_.name}}, @{N='GCP Native ID';E={$_.nativeId}}, @{N='RSC Project ID';E={$_.id}} | Format-Table -AutoSize
-            Write-Host "Project List Complete." -ForegroundColor Green
+            $projTable = $projects | Select-Object @{N='Project Name';E={$_.name}}, @{N='GCP Native ID';E={$_.nativeId}}, @{N='RSC Project ID';E={$_.id}} | Format-Table -AutoSize | Out-String
+            Write-Log $projTable
+            Write-Log "Project List Complete." -ForegroundColor Green
         } else {
-            Write-Warning "No GCP Projects found."
+            Write-Log "No GCP Projects found." -Level Warning
         }
         return
     }
 
     # 2. DISCOVERY: CENSUS & INVENTORY
-    Write-Host ">>> Step 2: Running Meditech Census to identify targets..." -ForegroundColor Cyan
+    Write-Log ">>> Step 2: Running Meditech Census to identify targets..." -ForegroundColor Cyan
     
     $censusResult = Invoke-MbfCensus `
         -User $MbfUser `
@@ -701,9 +800,9 @@ try {
         -Timeout $MbfTimeout
 
     # PRINT RAW OUTPUT FOR DEBUG/LOGGING
-    Write-Host "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
-    $censusResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
-    Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
+    Write-Log "    [RAW MBF CENSUS OUTPUT]" -ForegroundColor Gray
+    $censusResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
+    Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
 
     if ($censusResult.Luns.Count -eq 0) {
         Throw "Meditech Census returned no LUNs/Servers. Check MBF configuration or connectivity."
@@ -711,12 +810,12 @@ try {
 
     # Extract unique server names from Census (Case-insensitive)
     $meditechHosts = $censusResult.Luns.Server | Select-Object -Unique
-    Write-Host "    Census identified $($meditechHosts.Count) unique host(s): $($meditechHosts -join ', ')" -ForegroundColor Gray
+    Write-Log "    Census identified $($meditechHosts.Count) unique host(s): $($meditechHosts -join ', ')" -ForegroundColor Gray
 
     if ($GcpProjectId) {
-        Write-Host "    Filtering Inventory by Project ID: $GcpProjectId" -ForegroundColor Cyan
+        Write-Log "    Filtering Inventory by Project ID: $GcpProjectId" -ForegroundColor Cyan
     }
-    Write-Host "    Fetching RSC Inventory..." -ForegroundColor Cyan
+    Write-Log "    Fetching RSC Inventory..." -ForegroundColor Cyan
     $inventory = Get-RscGcpInventory -ApiEndpoint $graphqlUrl -Headers $rscHeaders -GcpProjectId $GcpProjectId
     
     # Match Census Hosts to RSC Inventory (Case-insensitive match on Native Name)
@@ -728,8 +827,8 @@ try {
     $missingHosts = $meditechHosts | Where-Object { $foundHosts -notcontains $_ }
     
     if ($missingHosts) {
-        Write-Warning "The following Meditech servers were NOT found in the Rubrik Inventory:"
-        Write-Warning ($missingHosts -join ", ")
+        Write-Log "The following Meditech servers were NOT found in the Rubrik Inventory:" -Level Warning
+        Write-Log ($missingHosts -join ", ") -Level Warning
     }
 
     if ($targetWorkloads.Count -eq 0) {
@@ -737,13 +836,13 @@ try {
     }
     
     $snappableIds = $targetWorkloads.id
-    Write-Host "    Resolved $($snappableIds.Count) VM(s) to snapshot." -ForegroundColor Green
+    Write-Log "    Resolved $($snappableIds.Count) VM(s) to snapshot." -ForegroundColor Green
 
     # 3. QUIESCE MEDITECH
-    Write-Host ">>> Step 3: Quiescing Meditech..." -ForegroundColor Yellow
+    Write-Log ">>> Step 3: Quiescing Meditech..." -ForegroundColor Yellow
     
     if ($Force) {
-        Write-Host "    [FORCE MODE ACTIVE]: Attempting Quiesce with M=force..." -ForegroundColor Magenta
+        Write-Log "    [FORCE MODE ACTIVE]: Attempting Quiesce with M=force..." -ForegroundColor Magenta
     }
 
     $quiesceResult = Invoke-MbfQuiesce `
@@ -755,22 +854,22 @@ try {
         -Force:$Force
 
     # PRINT RAW OUTPUT FOR DEBUG/LOGGING
-    Write-Host "    [RAW MBF QUIESCE OUTPUT]" -ForegroundColor Gray
-    $quiesceResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
-    Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
+    Write-Log "    [RAW MBF QUIESCE OUTPUT]" -ForegroundColor Gray
+    $quiesceResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
+    Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
 
     if (-not $quiesceResult.ReadyToSnap) {
         # CRITICAL FAILURE PATH
-        Write-Error "Quiesce Failed (Exit Code: $($quiesceResult.ExitCode))."
+        Write-Log "Quiesce Failed (Exit Code: $($quiesceResult.ExitCode))." -Level Error
         
         # Suggest Force if applicable and not already used
         if (-not $Force -and ($quiesceResult.ExitCode -eq 8 -or $quiesceResult.ExitCode -eq 9)) {
-            Write-Warning "MBF indicates this operation might succeed with -Force."
+            Write-Log "MBF indicates this operation might succeed with -Force." -Level Warning
         }
 
         # Handle Partial Failures (Code 2) or Force Failures (Code 9 requires unquiesce before retry)
         if ($quiesceResult.ExitCode -eq 2 -or $quiesceResult.ExitCode -eq 9) {
-            Write-Warning "Partial failure detected. Attempting immediate Unquiesce cleanup..."
+            Write-Log "Partial failure detected. Attempting immediate Unquiesce cleanup..." -Level Warning
             Invoke-MbfUnquiesce -User $MbfUser -Password $MbfPassword -Intermediary $MbfIntermediary -PathToMBF $MbfPath
         }
         Throw "Aborting Workflow due to Quiesce Failure."
@@ -778,10 +877,10 @@ try {
 
     # SAFETY FLAG ON: System is now frozen
     $isQuiesced = $true
-    Write-Host "    Quiesce Successful (Code $($quiesceResult.ExitCode))." -ForegroundColor Green
+    Write-Log "    Quiesce Successful (Code $($quiesceResult.ExitCode))." -ForegroundColor Green
 
     # 4. SNAPSHOT (CRITICAL TIMING)
-    Write-Host ">>> Step 4: Initiating Rubrik Snapshots..." -ForegroundColor Yellow
+    Write-Log ">>> Step 4: Initiating Rubrik Snapshots..." -ForegroundColor Yellow
     try {
         $snapResult = New-RscGcpSnapshot `
             -ApiEndpoint $graphqlUrl `
@@ -789,16 +888,16 @@ try {
             -SnappableIds $snappableIds `
             -RetentionSlaId $RetentionSlaId
         
-        Write-Host "    Snapshot Request Complete." -ForegroundColor Green
-        Write-Host "    Wall Clock Time: $($snapResult.WallClockDurationMs) ms" -ForegroundColor Cyan
-        Write-Host "    Server Exec Time: $($snapResult.ServerExecutionMs) ms" -ForegroundColor Cyan
+        Write-Log "    Snapshot Request Complete." -ForegroundColor Green
+        Write-Log "    Wall Clock Time: $($snapResult.WallClockDurationMs) ms" -ForegroundColor Cyan
+        Write-Log "    Server Exec Time: $($snapResult.ServerExecutionMs) ms" -ForegroundColor Cyan
     }
     catch {
-        Write-Error "Snapshot failed! $_"
+        Write-Log "Snapshot failed! $_" -Level Error
     }
 
     # 5. UNQUIESCE (IMMEDIATE)
-    Write-Host ">>> Step 5: Unquiescing Meditech..." -ForegroundColor Yellow
+    Write-Log ">>> Step 5: Unquiescing Meditech..." -ForegroundColor Yellow
     $uqResult = Invoke-MbfUnquiesce `
         -User $MbfUser `
         -Password $MbfPassword `
@@ -806,27 +905,27 @@ try {
         -PathToMBF $MbfPath
 
     # PRINT RAW OUTPUT FOR DEBUG/LOGGING
-    Write-Host "    [RAW MBF UNQUIESCE OUTPUT]" -ForegroundColor Gray
-    $uqResult.RawOutput | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
-    Write-Host "    [END RAW OUTPUT]" -ForegroundColor Gray
+    Write-Log "    [RAW MBF UNQUIESCE OUTPUT]" -ForegroundColor Gray
+    $uqResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
+    Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
 
     if ($uqResult.ExitCode -lt 2) {
-        Write-Host "    Unquiesce Successful." -ForegroundColor Green
+        Write-Log "    Unquiesce Successful." -ForegroundColor Green
         # SAFETY FLAG OFF: System is thawed
         $isQuiesced = $false
     } else {
-        Write-Error "    Unquiesce Failed! (Code $($uqResult.ExitCode)). Check System Immediately."
+        Write-Log "    Unquiesce Failed! (Code $($uqResult.ExitCode)). Check System Immediately." -Level Error
     }
 
 }
 catch {
-    Write-Error "Workflow Error: $_"
+    Write-Log "Workflow Error: $_" -Level Error
 }
 finally {
     # 6. EMERGENCY SAFETY NET
     if ($isQuiesced) {
-        Write-Warning "EMERGENCY: Script exited while Meditech was still Quiesced."
-        Write-Warning "Attempting Emergency Unquiesce..."
+        Write-Log "EMERGENCY: Script exited while Meditech was still Quiesced." -Level Warning
+        Write-Log "Attempting Emergency Unquiesce..." -Level Warning
         
         try {
             $emgResult = Invoke-MbfUnquiesce `
@@ -835,17 +934,11 @@ finally {
                 -Intermediary $MbfIntermediary `
                 -PathToMBF $MbfPath
             
-            Write-Host "Emergency Unquiesce Output:"
-            $emgResult.RawOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+            Write-Log "Emergency Unquiesce Output:"
+            $emgResult.RawOutput | ForEach-Object { Write-Log "  $_" -ForegroundColor Red }
         }
         catch {
-            Write-Error "FATAL: Failed to execute Emergency Unquiesce. Manual intervention required immediately."
+            Write-Log "FATAL: Failed to execute Emergency Unquiesce. Manual intervention required immediately." -Level Error
         }
     }
-
-    # 7. DISCONNECT
-    if ($rscHeaders) {
-        Write-Host ">>> Step 6: Disconnecting..." -ForegroundColor DarkGray
-        Disconnect-Rsc -Headers $rscHeaders
-    }
-} 
+}
