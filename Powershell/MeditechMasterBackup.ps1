@@ -7,12 +7,8 @@
     2. Runs MBF Census to dynamically discover active Meditech Servers.
     3. Fetches GCP Inventory and correlates with Census results.
     4. Quiesces Meditech via MBF.exe.
-    5. Triggers Rubrik Bulk Snapshot for the discovered VMs.
+    5. Triggers Rubrik Bulk Snapshot (Mutation) for the discovered VMs.
     6. Unquiesces Meditech immediately.
-.EXAMPLE
-    # Backup Mode with Logging Enabled
-    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "C:\creds.json" -RetentionSlaId "uuid" -MbfUser "usr" -MbfPassword "pwd" -MbfIntermediary "host" -EnableLogging
-
 .EXAMPLE
     # Backup Mode
     .\MeditechMasterWorkflow.ps1 `
@@ -215,8 +211,8 @@ function Write-Log {
             Write-Warning "[$ts] $Message"
         }
         "ERROR" {
-            # Write-Error automatically adds error stream formatting
-            Write-Error "[$ts] $Message"
+            # Fix: Use Continue action to ensure logging doesn't abort script execution when Preference is Stop
+            Write-Error "[$ts] $Message" -ErrorAction Continue
         }
     }
 }
@@ -299,7 +295,6 @@ function Invoke-MbfCensus {
     $lunObjects = @()
     foreach ($line in $result.Output) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        # Regex: Server:Drive=Serial|WWN (Permissive)
         if ($line -match "^(.+?):(.+?)[=\s]+([^|]*)\|?(.*?),?\s*$") {
             $lunObjects += [PSCustomObject]@{
                 Server    = $matches[1].Trim()
@@ -354,7 +349,6 @@ function Invoke-MbfQuiesce {
         }
     }
 
-    # Success criteria: Exit Code < 2 or Code 10 (Success with warnings)
     $isReadyForBackup = ($result.ExitCode -lt 2) -or ($result.ExitCode -eq 10)
 
     return [PSCustomObject]@{
@@ -776,6 +770,7 @@ try {
         return 
     }
 
+    # --- CHECK FOR LIST MODE: PROJECTS ---
     if ($PSCmdlet.ParameterSetName -eq "ListProjects") {
         Write-Log ">>> List Mode: Retrieving GCP Projects via GraphQL..." -ForegroundColor Cyan
         $projects = Get-RscGcpProjects -ApiEndpoint $graphqlUrl -Headers $rscHeaders
@@ -845,21 +840,49 @@ try {
         Write-Log "    [FORCE MODE ACTIVE]: Attempting Quiesce with M=force..." -ForegroundColor Magenta
     }
 
+    # Attempt 1: Standard Quiesce (Always False for first attempt)
     $quiesceResult = Invoke-MbfQuiesce `
         -User $MbfUser `
         -Password $MbfPassword `
         -Intermediary $MbfIntermediary `
         -PathToMBF $MbfPath `
         -Timeout $MbfTimeout `
-        -Force:$Force
+        -Force:$false
 
     # PRINT RAW OUTPUT FOR DEBUG/LOGGING
     Write-Log "    [RAW MBF QUIESCE OUTPUT]" -ForegroundColor Gray
     $quiesceResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
     Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
 
+    # --- RETRY LOGIC (FORCE) ---
+    # If standard run failed with Code 8 or 9 AND -Force switch is enabled, retry with Force
+    if (-not $quiesceResult.ReadyToSnap -and $Force -and ($quiesceResult.ExitCode -eq 8 -or $quiesceResult.ExitCode -eq 9)) {
+        Write-Log "MBF returned Exit Code $($quiesceResult.ExitCode) (TryForce). Force switch is enabled. Retrying with M=force..." -Level Warning
+        
+        # If exit code is 9 (Partial Success), must Unquiesce first per documentation
+        if ($quiesceResult.ExitCode -eq 9) {
+            Write-Log "Code 9 detected: Cleaning up partial state before forceful retry..." -Level Warning
+            $cleanup = Invoke-MbfUnquiesce -User $MbfUser -Password $MbfPassword -Intermediary $MbfIntermediary -PathToMBF $MbfPath
+            $cleanup.RawOutput | ForEach-Object { Write-Log "  [Cleanup]: $_" -ForegroundColor DarkGray }
+        }
+
+        # Attempt 2: Forced Quiesce
+        $quiesceResult = Invoke-MbfQuiesce `
+            -User $MbfUser `
+            -Password $MbfPassword `
+            -Intermediary $MbfIntermediary `
+            -PathToMBF $MbfPath `
+            -Timeout $MbfTimeout `
+            -Force:$true
+            
+        # Re-print output for the retry
+        Write-Log "    [RAW MBF FORCE QUIESCE OUTPUT]" -ForegroundColor Gray
+        $quiesceResult.RawOutput | ForEach-Object { Write-Log "      $_" -ForegroundColor Gray }
+        Write-Log "    [END RAW OUTPUT]" -ForegroundColor Gray
+    }
+    # ----------------------------------------
+
     if (-not $quiesceResult.ReadyToSnap) {
-        # CRITICAL FAILURE PATH
         Write-Log "Quiesce Failed (Exit Code: $($quiesceResult.ExitCode))." -Level Error
         
         # Suggest Force if applicable and not already used
@@ -867,10 +890,14 @@ try {
             Write-Log "MBF indicates this operation might succeed with -Force." -Level Warning
         }
 
-        # Handle Partial Failures (Code 2) or Force Failures (Code 9 requires unquiesce before retry)
-        if ($quiesceResult.ExitCode -eq 2 -or $quiesceResult.ExitCode -eq 9) {
-            Write-Log "Partial failure detected. Attempting immediate Unquiesce cleanup..." -Level Warning
-            Invoke-MbfUnquiesce -User $MbfUser -Password $MbfPassword -Intermediary $MbfIntermediary -PathToMBF $MbfPath
+        # Handle Partial Failures (Code 2), Force Failures (Code 9), or State Mismatch (Code 6)
+        # Code 6 ("Quiesce requested when Unquiesce was expected") implies the system is already frozen.
+        if ($quiesceResult.ExitCode -eq 2 -or $quiesceResult.ExitCode -eq 9 -or $quiesceResult.ExitCode -eq 6) {
+            Write-Log "Partial failure or stuck state detected (Code $($quiesceResult.ExitCode)). Attempting immediate Unquiesce cleanup..." -Level Warning
+            $cleanup = Invoke-MbfUnquiesce -User $MbfUser -Password $MbfPassword -Intermediary $MbfIntermediary -PathToMBF $MbfPath
+            
+            # Log cleanup details
+            $cleanup.RawOutput | ForEach-Object { Write-Log "  [Cleanup]: $_" -ForegroundColor DarkGray }
         }
         Throw "Aborting Workflow due to Quiesce Failure."
     }
@@ -879,7 +906,7 @@ try {
     $isQuiesced = $true
     Write-Log "    Quiesce Successful (Code $($quiesceResult.ExitCode))." -ForegroundColor Green
 
-    # 4. SNAPSHOT (CRITICAL TIMING)
+    # 4. SNAPSHOT 
     Write-Log ">>> Step 4: Initiating Rubrik Snapshots..." -ForegroundColor Yellow
     try {
         $snapResult = New-RscGcpSnapshot `
@@ -911,7 +938,6 @@ try {
 
     if ($uqResult.ExitCode -lt 2) {
         Write-Log "    Unquiesce Successful." -ForegroundColor Green
-        # SAFETY FLAG OFF: System is thawed
         $isQuiesced = $false
     } else {
         Write-Log "    Unquiesce Failed! (Code $($uqResult.ExitCode)). Check System Immediately." -Level Error
@@ -941,4 +967,10 @@ finally {
             Write-Log "FATAL: Failed to execute Emergency Unquiesce. Manual intervention required immediately." -Level Error
         }
     }
-}
+
+    # 7. DISCONNECT
+    if ($rscHeaders) {
+        Write-Log ">>> Step 6: Disconnecting..." -ForegroundColor DarkGray
+        Disconnect-Rsc -Headers $rscHeaders
+    }
+} 
