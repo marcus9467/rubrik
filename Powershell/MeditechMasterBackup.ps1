@@ -1,122 +1,211 @@
- <#
+<#
 .SYNOPSIS
-    Meditech Backup & Rubrik Snapshot Orchestration Script
+    Orchestrates Meditech GCP backup: MBF quiesce, Rubrik snapshot, MBF unquiesce.
+
 .DESCRIPTION
-    Orchestrates the backup workflow for Meditech on GCP using Rubrik Security Cloud (RSC).
-    1. Authenticates to RSC.
-    2. Runs MBF Census to dynamically discover active Meditech Servers.
-    3. Fetches GCP Inventory and correlates with Census results.
-    4. Quiesces Meditech via MBF.exe.
-    5. Triggers Rubrik Bulk Snapshot for the discovered VMs.
-    6. Unquiesces Meditech immediately.
+    MeditechMasterScript.ps1 automates the full crash-consistent backup cycle for
+    Meditech environments hosted on GCP and protected by Rubrik Security Cloud (RSC).
+
+    WORKFLOW (RunBackup mode — default)
+    ------------------------------------
+    Step 1  Authenticate to RSC using a service account.
+    Step 2  Run MBF Census to discover active Meditech servers and resolve them to
+            GCP VM IDs in the RSC inventory.
+    Step 3  Quiesce Meditech via mbf.exe (freeze I/O for a consistent snapshot).
+    Step 4  Trigger a Rubrik bulk snapshot for all resolved VMs, using the specified
+            retention SLA domain. Unquiesce is issued immediately after the API call
+            regardless of snapshot outcome.
+    Step 5  Unquiesce Meditech.
+    Step 6  Disconnect from RSC.
+
+    CREDENTIAL MODEL
+    ----------------
+    Recommended: use -MbfConfigXml pointing to the file created by
+    New-MeditechCredentials.ps1. That file is DPAPI-encrypted and contains:
+      - MBF username and password
+      - MBF intermediary host(s)
+      - RSC service account (client_id, client_secret, access_token_uri)
+      - Retention SLA ID
+      - Optional GCP project ID filter
+
+    Alternative: supply -ServiceAccountJson, -RetentionSlaId, -MbfUser, -MbfPassword,
+    and -MbfIntermediary directly on the command line (not recommended for scheduled
+    tasks — credentials appear in process audit logs).
+
+    PARAMETER SETS
+    --------------
+    RunBackup    (default) Full quiesce-snapshot-unquiesce cycle.
+    RunCensus    (-CensusOnly) MBF Census only — no RSC connection, no snapshot.
+    ListSlas     (-ListSlas)   Print RSC SLA domains — use to find -RetentionSlaId.
+    ListProjects (-ListProjects) Print RSC GCP projects — use to find -GcpProjectId.
+
+    MBF EXIT CODE REFERENCE
+    -----------------------
+    Code  Meaning
+    ----  -------
+    0     Success — all servers responded successfully.
+    1     Partial success — some servers did not respond (treated as success by this
+          script; individual server status is logged).
+    2     MBF is already in the quiesced state (cleanup unquiesce is triggered).
+    3     Unrecognised command or syntax error.
+    4     Authentication failure (bad username/password).
+    5     Connection failure — could not reach the intermediary.
+    6     Invalid intermediary specification.
+    7     Timeout waiting for server response.
+    8     Meditech servers are busy; retry recommended (-Force retries automatically).
+    9     Internal MBF error; retry recommended (-Force retries automatically).
+    10    M-AT platform — partial success (treated as success by this script).
+    11    M-AT platform — all servers responded (treated as success by this script).
+    12    Already quiesced (alternate code); cleanup unquiesce is triggered.
+
+.PARAMETER MbfConfigXml
+    Path to the DPAPI-encrypted XML credential file created by New-MeditechCredentials.ps1.
+    When supplied, this file provides MBF credentials, RSC service account details,
+    retention SLA ID, and optional GCP project ID — making all other credential
+    parameters optional.
+    The file is decryptable only by the Windows user account and machine that created it.
+    Default path if you used New-MeditechCredentials.ps1 without -OutputPath:
+      C:\ProgramData\Rubrik\MeditechCreds.xml
+
+.PARAMETER ServiceAccountJson
+    Path to an RSC service account JSON file. Used when -MbfConfigXml is not supplied
+    or does not contain embedded RSC credentials.
+    The JSON must contain: client_id, client_secret, access_token_uri.
+    Use New-MeditechCredentials.ps1 to embed the service account into the encrypted
+    XML instead of leaving client_secret in a plaintext JSON file.
+
+.PARAMETER RetentionSlaId
+    UUID of the RSC SLA domain to apply to snapshots taken in RunBackup mode.
+    Can be embedded in -MbfConfigXml (recommended) or supplied here.
+    Use -ListSlas to retrieve available SLA domain IDs.
+
+.PARAMETER GcpProjectId
+    Optional. RSC GCP project ID to filter the VM inventory search.
+    When omitted, all GCP projects visible to the service account are searched.
+    Can be embedded in -MbfConfigXml or supplied here.
+    Use -ListProjects to retrieve available project IDs.
+
+.PARAMETER Force
+    When specified, automatically retries the quiesce operation if MBF returns exit
+    code 8 (servers busy) or 9 (internal error). Without -Force, the script stops
+    and reports the failure.
+
+.PARAMETER MbfUser
+    MBF username. Used when -MbfConfigXml is not supplied.
+    This credential is passed to mbf.exe at runtime and is NOT written to disk.
+
+.PARAMETER MbfPassword
+    MBF password (plain text). Used when -MbfConfigXml is not supplied.
+    Avoid supplying this on the command line for scheduled tasks; use -MbfConfigXml
+    instead so the password is never visible in process/audit logs.
+
+.PARAMETER MbfIntermediary
+    One or more MBF intermediary host:port strings.
+    Single:   "RUB-MBI:2987"
+    Multiple: "RUB-MBI:2987,RUB-MATFS:2987"   (comma-separated string or string array)
+    Used when -MbfConfigXml is not supplied.
+
+.PARAMETER MbfPath
+    Full path to the mbf.exe binary.
+    Default: C:\Program Files (x86)\MEDITECH\MBI\mbf.exe
+
+.PARAMETER MbfTimeout
+    Seconds to allow each mbf.exe invocation (Census, Quiesce, Unquiesce) to run
+    before the process is forcibly terminated.
+    Default: 90 seconds.
+
+.PARAMETER CensusOnly
+    Switch. Runs MBF Census and prints the discovered server list, then exits.
+    Does not connect to RSC, does not quiesce, does not take snapshots.
+    Useful for validating MBF connectivity before scheduling a full backup.
+
+.PARAMETER ListSlas
+    Switch. Connects to RSC and lists all visible SLA domains (name + UUID).
+    Use the UUID as -RetentionSlaId (or embed it via New-MeditechCredentials.ps1).
+
+.PARAMETER ListProjects
+    Switch. Connects to RSC and lists all visible GCP projects
+    (project name, GCP native ID, RSC project UUID).
+    Use the RSC project UUID as -GcpProjectId (or embed it via
+    New-MeditechCredentials.ps1).
+
+.PARAMETER EnableLogging
+    Switch. Appends timestamped log entries to the file specified by -LogPath.
+    All console output is also written to the log file.
+    Recommended for scheduled task deployments.
+
+.PARAMETER LogPath
+    Path to the log file used when -EnableLogging is specified.
+    The directory is created automatically if it does not exist.
+    Default: C:\ProgramData\Rubrik\Logs\MeditechBackup.log
+
 .EXAMPLE
-    # Backup Mode using encrypted credential file (recommended for Task Scheduler)
+    # Standard scheduled-task invocation using the encrypted credential file.
     # Run New-MeditechCredentials.ps1 once as the service account to create the XML.
-    # The XML contains MBF creds, RSC service account, SLA ID, and optional GCP project.
-    .\MeditechMasterWorkflow.ps1 `
-        -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" `
-        -EnableLogging
+    .\MeditechMasterScript.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -EnableLogging
 
 .EXAMPLE
-    # Backup Mode with Logging Enabled (inline credentials)
-    .\MeditechMasterWorkflow.ps1 -ServiceAccountJson "C:\creds.json" -RetentionSlaId "uuid" -MbfUser "usr" -MbfPassword "pwd" -MbfIntermediary "host" -EnableLogging
+    # Discover available SLA domains to find the correct RetentionSlaId.
+    .\MeditechMasterScript.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -ListSlas
 
 .EXAMPLE
-    # Backup Mode (inline credentials)
-    .\MeditechMasterWorkflow.ps1 `
-        -ServiceAccountJson "C:\creds\rsc_service_account.json" `
-        -RetentionSlaId "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" `
-        -MbfUser "mbfUser" `
-        -MbfPassword "mbfSecret" `
-        -MbfIntermediary "MasterServer:XXXX"
-    
-    # Output:
-    # >>> Step 1: Connecting to Rubrik Security Cloud...
-    # >>> Step 2: Running Meditech Census to identify targets...
-    #     [RAW MBF CENSUS OUTPUT]
-    #       MEDITECH Backup Facilitator Version 1.7.3.0
-    #       Copyright (C) 2011-2019 Medical Information Technology, Inc.
-    #       Server1:Server1 E=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|,
-    #       Server2:Server2 E=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|,
-    #       ...
-    #     [END RAW OUTPUT]
-    #     Census identified 2 unique host(s): RUB-MATFS, RUB-NPRFS
-    #     Fetching RSC Inventory...
-    #     Resolved X VM(s) to snapshot.
-    # >>> Step 3: Quiescing Meditech...
-    #     [RAW MBF QUIESCE OUTPUT]
-    #       MEDITECH Backup Facilitator Version 1.7.3.0
-    #       Copyright (C) 2011-2019 Medical Information Technology, Inc.
-    #       Server1=SUCCESS,
-    #       Server2=SUCCESS,
-    #       ...
-    #     [END RAW OUTPUT]
-    #     Quiesce Successful (Code 0).
-    # >>> Step 4: Initiating Rubrik Snapshots...
-    #     Snapshot Request Complete.
-    #     Wall Clock Time: 0 ms
-    #     Server Exec Time: 0 ms
-    # >>> Step 5: Unquiescing Meditech...
-    #     [RAW MBF UNQUIESCE OUTPUT]
-    #       MEDITECH Backup Facilitator Version 1.7.3.0
-    #       Copyright (C) 2011-2019 Medical Information Technology, Inc.
-    #       Server1=SUCCESS,
-    #       Server2=SUCCESS,
-    #       ...
-    #     [END RAW OUTPUT]
-    #     Unquiesce Successful.
-    # >>> Step 6: Disconnecting...
+    # Discover available GCP projects to find the correct GcpProjectId.
+    .\MeditechMasterScript.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -ListProjects
 
 .EXAMPLE
-    # Backup Mode (Multiple Intermediaries)
-    .\MeditechMasterWorkflow.ps1 `
-        -MbfIntermediary "RUB-MBI:2987,RUB-MATFS:2987" `
-        ...
+    # Validate MBF connectivity without connecting to RSC or taking any snapshots.
+    .\MeditechMasterScript.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -CensusOnly
 
 .EXAMPLE
-    # Backup Mode with Force Enabled (Auto-retries on Code 8/9)
-    .\MeditechMasterWorkflow.ps1 `
-        -ServiceAccountJson "C:\creds.json" `
-        -RetentionSlaId "..." `
-        -Force
-
-.EXAMPLE
-    # Census Only Mode (No Backup, No RSC Connection)
-    .\MeditechMasterWorkflow.ps1 `
+    # Census only using inline MBF credentials (no XML required).
+    .\MeditechMasterScript.ps1 `
         -MbfUser "ISB" `
         -MbfPassword "Secret" `
         -MbfIntermediary "RUB-MBI:2987" `
         -CensusOnly
 
 .EXAMPLE
-    # List SLAs Mode (use -MbfConfigXml or -ServiceAccountJson)
-    .\MeditechMasterWorkflow.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -ListSlas
-    # Output:
-    # >>> Step 1: Connecting to Rubrik Security Cloud...
-    # >>> List Mode: Retrieving SLA Domains via GraphQL...
-    #
-    # name                id
-    # ----                --
-    # Bronze              00000000-0000-0000-0000-000000000002
-    # custom-sla-1        00000000-0000-0000-0000-000000000003
-    # Gold                00000000-0000-0000-0000-000000000000
-    # Silver              00000000-0000-0000-0000-000000000001
+    # Full backup with inline credentials (not recommended for scheduled tasks).
+    # Use -MbfConfigXml to avoid exposing secrets in process audit logs.
+    .\MeditechMasterScript.ps1 `
+        -ServiceAccountJson "C:\creds\rsc_service_account.json" `
+        -RetentionSlaId "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" `
+        -MbfUser "ISB" `
+        -MbfPassword "Secret" `
+        -MbfIntermediary "RUB-MBI:2987" `
+        -EnableLogging
 
 .EXAMPLE
-    # List Projects Mode (use -MbfConfigXml or -ServiceAccountJson)
-    .\MeditechMasterWorkflow.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" -ListProjects
-    # Output:
-    # >>> Step 1: Connecting to Rubrik Security Cloud...
-    # >>> List Mode: Retrieving GCP Projects via GraphQL...
-    #
-    # Project Name                  GCP Native ID                 RSC Project ID
-    # ------------                  -------------                 --------------
-    # gcp-rbrkdev-cnp               gcp-rbrkdev-cnp               00000000-0000-0000-0000-000000000000
-    # gcp-rubrikcom-cnp             gcp-rubrikcom-cnp             00000000-0000-0000-0000-000000000001
+    # Full backup with multiple MBF intermediaries and Force retry enabled.
+    .\MeditechMasterScript.ps1 `
+        -MbfConfigXml "C:\ProgramData\Rubrik\MeditechCreds.xml" `
+        -MbfIntermediary "RUB-MBI:2987,RUB-MATFS:2987" `
+        -Force `
+        -EnableLogging
+
 .NOTES
-    Author  : Marcus Henderson 
+    Author  : Marcus Henderson
     Created : January 2026
     Company : Rubrik Inc
+
+    PREREQUISITES
+    -------------
+    - Windows PowerShell 5.1 or later.
+    - mbf.exe installed at -MbfPath (default: C:\Program Files (x86)\MEDITECH\MBI\mbf.exe).
+    - RSC service account with GCP inventory read permissions and snapshot permissions.
+    - When using -MbfConfigXml, this script must run as the same Windows user account
+      that created the XML file (DPAPI decryption is user + machine bound).
+    - Run New-MeditechCredentials.ps1 once before scheduling this script.
+
+    LOGGING
+    -------
+    With -EnableLogging, each run appends to the log file. The log file is never
+    rotated by this script — implement external log rotation if needed.
+
+    RELATED SCRIPTS
+    ---------------
+    New-MeditechCredentials.ps1 — one-time setup wizard that creates the encrypted
+    XML credential file consumed by this script.
 #>
 [cmdletbinding(DefaultParameterSetName = "RunBackup")]
 param (
