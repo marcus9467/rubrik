@@ -3,14 +3,14 @@
     Searches for vSphere VMs based on name prefixes or exact names and applies an SLA Domain.
 
 .DESCRIPTION
-    This script authenticates using a Rubrik Service Account JSON file. It allows 
-    searching for VMs using one or multiple comma-separated string matches (prefixes or exact names). 
-    
-    It evaluates the matched VMs and excludes any that are already assigned to the target 
-    SLA Domain (e.g., DO_NOT_PROTECT) to prevent redundant API calls. Finally, it applies 
+    This script authenticates using a Rubrik Service Account JSON file. It allows
+    searching for VMs using one or multiple comma-separated string matches (prefixes or exact names).
+
+    It evaluates the matched VMs and excludes any that are already assigned to the target
+    SLA Domain (e.g., DO_NOT_PROTECT) to prevent redundant API calls. Finally, it applies
     the target SLA to the aggregated list of eligible VMs.
 
-    Use the -ReportOnly switch to safely preview the VMs that would be affected, 
+    Use the -ReportOnly switch to safely preview the VMs that would be affected,
     along with their Current SLA, without actually making any changes to the system.
 
 .EXAMPLE
@@ -25,10 +25,13 @@
     # Example 3: Search for multiple prefixes/names and assign a custom SLA
     .\Get-VSphereVMsList.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "ad, sql, web" -SlaId "YOUR_SLA_ID_HERE"
 
-.NOTES
-    Author  : Marcus Henderson <marcus.henderson@rubrik.com> 
-    Created : February 26, 2026
-    Company : Rubrik Inc
+.EXAMPLE
+    # Example 4: Scope results to a specific vCenter (report only)
+    .\Set-vSphereVMPrefix.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "ad" -VCenterName "vcenter01.lab.local" -ReportOnly
+
+.EXAMPLE
+    # Example 5: Apply SLA only to VMs under a specific vCenter
+    .\Set-vSphereVMPrefix.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "sql" -VCenterName "vcenter01.lab.local" -SlaId "YOUR_SLA_ID_HERE"
 #>
 
 [CmdletBinding()]
@@ -41,6 +44,9 @@ param (
 
     [Parameter(Mandatory=$false)]
     [string]$SlaId = "DO_NOT_PROTECT",
+
+    [Parameter(Mandatory=$false)]
+    [string]$VCenterName,
 
     [Parameter(Mandatory=$false)]
     [switch]$ReportOnly
@@ -107,6 +113,61 @@ function Disconnect-Polaris {
     }
 }
 
+function Get-VSphereVCenter {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$GraphQLEndpoint,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Headers,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VCenterName
+    )
+
+    $Query = @"
+    query VSphereVCenterListQuery(`$filter: [Filter!], `$first: Int) {
+      vSphereVCenterConnection(filter: `$filter, first: `$first) {
+        edges {
+          node {
+            id
+            name
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+    }
+"@
+
+    $Payload = @{
+        query     = $Query
+        variables = @{
+            first  = 50
+            filter = @(
+                @{ field = "NAME"; texts = @($VCenterName) }
+            )
+        }
+    } | ConvertTo-Json -Depth 10
+
+    try {
+        $Response = Invoke-RestMethod -Uri $GraphQLEndpoint -Method Post -Headers $Headers -Body $Payload -ContentType "application/json"
+
+        if ($Response.errors) {
+            Write-Error "GraphQL returned errors: $($Response.errors | ConvertTo-Json -Depth 5)"
+            throw
+        }
+
+        return $Response.data.vSphereVCenterConnection.edges.node
+    }
+    catch {
+        Write-Error "Failed to query vSphere vCenters. Error: $_"
+        throw
+    }
+}
+
 function Get-VSphereVMsList {
     [CmdletBinding()]
     param (
@@ -160,7 +221,7 @@ function Get-VSphereVMsList {
     )
 
     $Query = @"
-    query VSphereVMsListQuery(`$first: Int!, `$after: String, `$filter: [Filter!]!, `$isMultitenancyEnabled: Boolean = false, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isDuplicatedVmsIncluded: Boolean = true, `$includeRscNativeObjectPendingSla: Boolean = false, `$isObjectProtectionPauseEnabled: Boolean = false, `$isRscTagEnabled: Boolean = false) {  
+    query VSphereVMsListQuery(`$first: Int!, `$after: String, `$filter: [Filter!]!, `$isMultitenancyEnabled: Boolean = false, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isDuplicatedVmsIncluded: Boolean = true, `$includeRscNativeObjectPendingSla: Boolean = false, `$isObjectProtectionPauseEnabled: Boolean = false, `$isRscTagEnabled: Boolean = false) {
       vSphereVmNewConnection(filter: `$filter, first: `$first, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
         edges {
           cursor
@@ -491,7 +552,7 @@ function Get-VSphereVMsList {
 
     try {
         $Response = Invoke-RestMethod -Uri $GraphQLEndpoint -Method Post -Headers $Headers -Body $Payload -ContentType "application/json"
-        
+
         if ($Response.errors) {
             Write-Error "GraphQL returned errors: $($Response.errors | ConvertTo-Json -Depth 5)"
         }
@@ -580,7 +641,7 @@ function Set-SLADomains {
         } | ConvertTo-Json -Depth 10
 
         $Result = Invoke-RestMethod -Uri $GraphQLEndpoint -Method Post -Headers $Headers -Body $Payload -ContentType "application/json"
-        
+
         if ($Result.errors) {
             Write-Error "GraphQL returned errors: $($Result.errors | ConvertTo-Json -Depth 5)"
         }
@@ -617,10 +678,31 @@ $Headers = @{
 $GraphQLUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "graphql")
 $LogoutUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "session")
 
-# 2. Iterate through VM Prefixes and accumulate matching VMs
+# 2. Resolve vCenter filter if specified
+$VCenterFid = $null
+if (-not [string]::IsNullOrWhiteSpace($VCenterName)) {
+    Write-Host "Resolving vCenter '$VCenterName'..."
+    $VCenters = Get-VSphereVCenter -GraphQLEndpoint $GraphQLUrl -Headers $Headers -VCenterName $VCenterName
+
+    if (-not $VCenters -or @($VCenters).Count -eq 0) {
+        Write-Error "No vCenter found matching name '$VCenterName'. Exiting."
+        Disconnect-Polaris -Headers $Headers -LogoutUrl $LogoutUrl
+        exit 1
+    }
+
+    if (@($VCenters).Count -gt 1) {
+        Write-Warning "Multiple vCenters matched '$VCenterName'. Using first: '$($VCenters[0].name)' ($($VCenters[0].id))"
+    } else {
+        Write-Host "Resolved vCenter: '$($VCenters[0].name)' ($($VCenters[0].id))"
+    }
+
+    $VCenterFid = $VCenters[0].id
+}
+
+# 3. Iterate through VM Prefixes and accumulate matching VMs
 $AllVMs = New-Object System.Collections.Generic.List[object]
 
-# Ensure we handle comma separated prefixes accurately
+# 4. Ensure we handle comma separated prefixes accurately
 if ($VmPrefixes.Count -eq 1 -and $VmPrefixes[0] -match ",") {
     $VmPrefixes = $VmPrefixes[0] -split "," | ForEach-Object { $_.Trim() }
 }
@@ -630,7 +712,7 @@ foreach ($Prefix in $VmPrefixes) {
         Write-Host "Searching for VMs with prefix: '$Prefix'..."
         # NOTE: We use -ExcludeUnprotected to ensure we drop items that are ALREADY assigned DO_NOT_PROTECT
         $Result = Get-VSphereVMsList -GraphQLEndpoint $GraphQLUrl -Headers $Headers -VmPrefix $Prefix -ExcludeUnprotected
-        
+
         $VMs = $Result.vSphereVmNewConnection.edges.node
         if ($VMs) {
             foreach ($VM in $VMs) {
@@ -640,15 +722,24 @@ foreach ($Prefix in $VmPrefixes) {
     }
 }
 
-# 3. Deduplicate VMs (in case prefixes overlap, like "ad" and "admin")
-# We group by ID and grab the first object in each group so we retain the VM Name for reporting
+# 5. Deduplicate VMs (in case prefixes overlap, like "ad" and "admin")
 $UniqueVMs = $AllVMs | Group-Object -Property id | ForEach-Object { $_.Group[0] }
+
+# 6. Apply vCenter filter if specified (client-side on physicalPath ancestry)
+if ($VCenterFid) {
+    $BeforeCount = @($UniqueVMs).Count
+    $UniqueVMs = $UniqueVMs | Where-Object {
+        $_.physicalPath | Where-Object { $_.objectType -eq "VSphereVcenter" -and $_.fid -eq $VCenterFid }
+    }
+    Write-Host ("vCenter filter applied: {0} -> {1} VMs." -f $BeforeCount, @($UniqueVMs).Count)
+}
+
 $UniqueVmIds = $UniqueVMs.id
 
-# 4. Assign the SLA Domain or output Report
+# 7. Assign the SLA Domain or output Report
 if ($UniqueVmIds) {
     Write-Host ("Found {0} eligible VMs." -f $UniqueVmIds.Count)
-    
+
     if ($ReportOnly.IsPresent) {
         Write-Host "===========================================================" -ForegroundColor Cyan
         Write-Host " REPORT ONLY MODE: The following VMs would be updated to '$SlaId'" -ForegroundColor Cyan
@@ -658,7 +749,7 @@ if ($UniqueVmIds) {
     } else {
         Write-Host ("Applying SLA Domain '{0}'..." -f $SlaId)
         $AssignmentResult = Set-SLADomains -GraphQLEndpoint $GraphQLUrl -Headers $Headers -SlaId $SlaId -ObjectIds $UniqueVmIds
-        
+
         if ($AssignmentResult.success) {
             Write-Host "Success: SLA Domain update initiated." -ForegroundColor Green
         } else {
@@ -669,5 +760,5 @@ if ($UniqueVmIds) {
     Write-Host "No eligible VMs were found matching the provided prefixes."
 }
 
-# 5. Cleanup session
-Disconnect-Polaris -Headers $Headers -LogoutUrl $LogoutUrl
+# 8. Cleanup session
+Disconnect-Polaris -Headers $Headers -LogoutUrl $LogoutUrl%
