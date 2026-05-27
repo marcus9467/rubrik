@@ -32,6 +32,14 @@
 .EXAMPLE
     # Example 5: Apply SLA only to VMs under a specific vCenter
     .\Set-vSphereVMPrefix.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "sql" -VCenterName "vcenter01.lab.local" -SlaId "YOUR_SLA_ID_HERE"
+
+.EXAMPLE
+    # Example 6: Preview all powered-off VMs (any name) that would receive DO_NOT_PROTECT
+    .\Set-vSphereVMPrefix.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "" -PoweredOffOnly -ReportOnly
+
+.EXAMPLE
+    # Example 7: Apply DO_NOT_PROTECT to all powered-off VMs under a specific vCenter
+    .\Set-vSphereVMPrefix.ps1 -ServiceAccountJson "C:\path\to\sa.json" -VmPrefixes "" -VCenterName "vcenter01.lab.local" -PoweredOffOnly
 #>
 
 [CmdletBinding()]
@@ -47,6 +55,9 @@ param (
 
     [Parameter(Mandatory=$false)]
     [string]$VCenterName,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$PoweredOffOnly,
 
     [Parameter(Mandatory=$false)]
     [switch]$ReportOnly
@@ -217,7 +228,10 @@ function Get-VSphereVMsList {
         [switch]$IsRscTagEnabled,
 
         [Parameter(Mandatory = $false)]
-        [switch]$ExcludeUnprotected
+        [switch]$ExcludeUnprotected,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$PoweredOffOnly
     )
 
     $Query = @"
@@ -273,6 +287,7 @@ function Get-VSphereVMsList {
               physicalBytes
               __typename
             }
+            powerStatus
             vmwareToolsInstalled
             templateType
             agentStatus {
@@ -528,6 +543,9 @@ function Get-VSphereVMsList {
     if (-not [string]::IsNullOrWhiteSpace($VmPrefix)) {
         $ActiveFilter += @{ field = "NAME"; texts = @($VmPrefix) }
     }
+    if ($PoweredOffOnly.IsPresent) {
+        $ActiveFilter += @{ field = "POWER_STATUS"; texts = @("Powered Off") }
+    }
 
     $Variables = @{
         first                            = $First
@@ -711,7 +729,15 @@ foreach ($Prefix in $VmPrefixes) {
     if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
         Write-Host "Searching for VMs with prefix: '$Prefix'..."
         # NOTE: We use -ExcludeUnprotected to ensure we drop items that are ALREADY assigned DO_NOT_PROTECT
-        $Result = Get-VSphereVMsList -GraphQLEndpoint $GraphQLUrl -Headers $Headers -VmPrefix $Prefix -ExcludeUnprotected
+        $GetVMsParams = @{
+            GraphQLEndpoint  = $GraphQLUrl
+            Headers          = $Headers
+            VmPrefix         = $Prefix
+            ExcludeUnprotected = $true
+        }
+        if ($PoweredOffOnly.IsPresent) { $GetVMsParams['PoweredOffOnly'] = $true }
+
+        $Result = Get-VSphereVMsList @GetVMsParams
 
         $VMs = $Result.vSphereVmNewConnection.edges.node
         if ($VMs) {
@@ -744,7 +770,7 @@ if ($UniqueVmIds) {
         Write-Host "===========================================================" -ForegroundColor Cyan
         Write-Host " REPORT ONLY MODE: The following VMs would be updated to '$SlaId'" -ForegroundColor Cyan
         Write-Host "===========================================================" -ForegroundColor Cyan
-        $UniqueVMs | Select-Object name, id, @{Name="Current SLA"; Expression={$_.effectiveSlaDomain.name}} | Format-Table -AutoSize | Out-String | Write-Host
+        $UniqueVMs | Select-Object name, id, powerStatus, @{Name="Current SLA"; Expression={$_.effectiveSlaDomain.name}} | Format-Table -AutoSize | Out-String | Write-Host
         Write-Host "No changes were made to the system." -ForegroundColor Cyan
     } else {
         Write-Host ("Applying SLA Domain '{0}'..." -f $SlaId)
