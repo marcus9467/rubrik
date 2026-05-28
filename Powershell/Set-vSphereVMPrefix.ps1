@@ -3,14 +3,14 @@
     Searches for vSphere VMs based on name prefixes or exact names and applies an SLA Domain.
 
 .DESCRIPTION
-    This script authenticates using a Rubrik Service Account JSON file. It allows
-    searching for VMs using one or multiple comma-separated string matches (prefixes or exact names).
-
-    It evaluates the matched VMs and excludes any that are already assigned to the target
-    SLA Domain (e.g., DO_NOT_PROTECT) to prevent redundant API calls. Finally, it applies
+    This script authenticates using a Rubrik Service Account JSON file. It allows 
+    searching for VMs using one or multiple comma-separated string matches (prefixes or exact names). 
+    
+    It evaluates the matched VMs and excludes any that are already assigned to the target 
+    SLA Domain (e.g., DO_NOT_PROTECT) to prevent redundant API calls. Finally, it applies 
     the target SLA to the aggregated list of eligible VMs.
 
-    Use the -ReportOnly switch to safely preview the VMs that would be affected,
+    Use the -ReportOnly switch to safely preview the VMs that would be affected, 
     along with their Current SLA, without actually making any changes to the system.
 
 .EXAMPLE
@@ -235,7 +235,7 @@ function Get-VSphereVMsList {
     )
 
     $Query = @"
-    query VSphereVMsListQuery(`$first: Int!, `$after: String, `$filter: [Filter!]!, `$isMultitenancyEnabled: Boolean = false, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isDuplicatedVmsIncluded: Boolean = true, `$includeRscNativeObjectPendingSla: Boolean = false, `$isObjectProtectionPauseEnabled: Boolean = false, `$isRscTagEnabled: Boolean = false) {
+    query VSphereVMsListQuery(`$first: Int!, `$after: String, `$filter: [Filter!]!, `$isMultitenancyEnabled: Boolean = false, `$sortBy: HierarchySortByField, `$sortOrder: SortOrder, `$isDuplicatedVmsIncluded: Boolean = true, `$includeRscNativeObjectPendingSla: Boolean = false, `$isObjectProtectionPauseEnabled: Boolean = false, `$isRscTagEnabled: Boolean = false) {  
       vSphereVmNewConnection(filter: `$filter, first: `$first, after: `$after, sortBy: `$sortBy, sortOrder: `$sortOrder) {
         edges {
           cursor
@@ -543,9 +543,8 @@ function Get-VSphereVMsList {
     if (-not [string]::IsNullOrWhiteSpace($VmPrefix)) {
         $ActiveFilter += @{ field = "NAME"; texts = @($VmPrefix) }
     }
-    if ($PoweredOffOnly.IsPresent) {
-        $ActiveFilter += @{ field = "POWER_STATUS"; texts = @("Powered Off") }
-    }
+    # NOTE: POWER_STATUS is NOT a valid HierarchyFilterField in RSC GraphQL.
+    # PoweredOffOnly is enforced client-side after the response (see below).
 
     $Variables = @{
         first                            = $First
@@ -567,10 +566,9 @@ function Get-VSphereVMsList {
         query     = $Query
         variables = $Variables
     } | ConvertTo-Json -Depth 10
-
     try {
         $Response = Invoke-RestMethod -Uri $GraphQLEndpoint -Method Post -Headers $Headers -Body $Payload -ContentType "application/json"
-
+        
         if ($Response.errors) {
             Write-Error "GraphQL returned errors: $($Response.errors | ConvertTo-Json -Depth 5)"
         }
@@ -579,6 +577,14 @@ function Get-VSphereVMsList {
         if ($ExcludeUnprotected.IsPresent -and $Response.data.vSphereVmNewConnection.edges) {
             $FilteredEdges = $Response.data.vSphereVmNewConnection.edges | Where-Object {
                 $_.node.effectiveSlaDomain.id -ne 'DO_NOT_PROTECT'
+            }
+            $Response.data.vSphereVmNewConnection.edges = @($FilteredEdges)
+        }
+
+        # Client-side power-status filter (RSC has no server-side filter for this).
+        if ($PoweredOffOnly.IsPresent -and $Response.data.vSphereVmNewConnection.edges) {
+            $FilteredEdges = $Response.data.vSphereVmNewConnection.edges | Where-Object {
+                $_.node.powerStatus -match '(?i)off'
             }
             $Response.data.vSphereVmNewConnection.edges = @($FilteredEdges)
         }
@@ -659,7 +665,7 @@ function Set-SLADomains {
         } | ConvertTo-Json -Depth 10
 
         $Result = Invoke-RestMethod -Uri $GraphQLEndpoint -Method Post -Headers $Headers -Body $Payload -ContentType "application/json"
-
+        
         if ($Result.errors) {
             Write-Error "GraphQL returned errors: $($Result.errors | ConvertTo-Json -Depth 5)"
         }
@@ -725,27 +731,46 @@ if ($VmPrefixes.Count -eq 1 -and $VmPrefixes[0] -match ",") {
     $VmPrefixes = $VmPrefixes[0] -split "," | ForEach-Object { $_.Trim() }
 }
 
+# Treat an empty/whitespace prefix as "no name filter" (all VMs) — needed for PoweredOffOnly sweeps.
+if (-not $VmPrefixes -or $VmPrefixes.Count -eq 0) {
+    $VmPrefixes = @("")
+}
+
 foreach ($Prefix in $VmPrefixes) {
-    if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
-        Write-Host "Searching for VMs with prefix: '$Prefix'..."
-        # NOTE: We use -ExcludeUnprotected to ensure we drop items that are ALREADY assigned DO_NOT_PROTECT
-        $GetVMsParams = @{
-            GraphQLEndpoint  = $GraphQLUrl
-            Headers          = $Headers
-            VmPrefix         = $Prefix
-            ExcludeUnprotected = $true
-        }
-        if ($PoweredOffOnly.IsPresent) { $GetVMsParams['PoweredOffOnly'] = $true }
+    $Label = if ([string]::IsNullOrWhiteSpace($Prefix)) { "<all VMs>" } else { "'$Prefix'" }
+    Write-Host "Searching for VMs with prefix: $Label..."
 
-        $Result = Get-VSphereVMsList @GetVMsParams
-
-        $VMs = $Result.vSphereVmNewConnection.edges.node
-        if ($VMs) {
-            foreach ($VM in $VMs) {
-                $AllVMs.Add($VM)
-            }
-        }
+    $GetVMsParams = @{
+        GraphQLEndpoint    = $GraphQLUrl
+        Headers            = $Headers
+        ExcludeUnprotected = $true
     }
+    if (-not [string]::IsNullOrWhiteSpace($Prefix)) { $GetVMsParams['VmPrefix'] = $Prefix }
+    if ($PoweredOffOnly.IsPresent) { $GetVMsParams['PoweredOffOnly'] = $true }
+
+    # Paginate until hasNextPage is false. Required because PoweredOffOnly is
+    # filtered client-side AFTER the page is fetched — a single page of 50 may
+    # contain few/no matches even when many exist globally.
+    $After = $null
+    $PageNum = 0
+    do {
+        $PageNum++
+        $PageParams = $GetVMsParams.Clone()
+        if ($After) { $PageParams['After'] = $After }
+
+        $Result = Get-VSphereVMsList @PageParams
+        $Connection = $Result.vSphereVmNewConnection
+
+        $VMs = $Connection.edges.node
+        if ($VMs) {
+            foreach ($VM in $VMs) { $AllVMs.Add($VM) }
+        }
+
+        $After = $Connection.pageInfo.endCursor
+        $HasNext = [bool]$Connection.pageInfo.hasNextPage
+        Write-Host ("  page {0}: +{1} matches (running total {2}){3}" -f `
+            $PageNum, @($VMs).Count, $AllVMs.Count, $(if ($HasNext) { ', more pages...' } else { '' }))
+    } while ($HasNext)
 }
 
 # 5. Deduplicate VMs (in case prefixes overlap, like "ad" and "admin")
@@ -765,7 +790,7 @@ $UniqueVmIds = $UniqueVMs.id
 # 7. Assign the SLA Domain or output Report
 if ($UniqueVmIds) {
     Write-Host ("Found {0} eligible VMs." -f $UniqueVmIds.Count)
-
+    
     if ($ReportOnly.IsPresent) {
         Write-Host "===========================================================" -ForegroundColor Cyan
         Write-Host " REPORT ONLY MODE: The following VMs would be updated to '$SlaId'" -ForegroundColor Cyan
@@ -775,7 +800,7 @@ if ($UniqueVmIds) {
     } else {
         Write-Host ("Applying SLA Domain '{0}'..." -f $SlaId)
         $AssignmentResult = Set-SLADomains -GraphQLEndpoint $GraphQLUrl -Headers $Headers -SlaId $SlaId -ObjectIds $UniqueVmIds
-
+        
         if ($AssignmentResult.success) {
             Write-Host "Success: SLA Domain update initiated." -ForegroundColor Green
         } else {
@@ -787,4 +812,4 @@ if ($UniqueVmIds) {
 }
 
 # 8. Cleanup session
-Disconnect-Polaris -Headers $Headers -LogoutUrl $LogoutUrl%
+Disconnect-Polaris -Headers $Headers -LogoutUrl $LogoutUrl
