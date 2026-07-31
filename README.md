@@ -4,7 +4,7 @@ Production-tested automation for [Rubrik](https://www.rubrik.com/) CDM and Rubri
 
 Every script here started as a specific operational problem in a customer environment — a migration that stalled, a report that didn't exist, a recovery that had to be proven before go-live — and was then generalized and hardened for reuse.
 
-**Contents:** 41 PowerShell scripts · 26 reusable PowerShell functions · 12 Python scripts · 3 shell scripts
+**Contents:** 39 PowerShell scripts · 26 reusable PowerShell functions · 12 Python scripts · 3 shell scripts
 
 ---
 
