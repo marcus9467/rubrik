@@ -1,3 +1,20 @@
+# OS cruft
+.DS_Store
+Thumbs.db
 
+# Credentials and service accounts -- never commit these
+*.pem
+*.key
+serviceAccount*.json
+rsc-service-account*.json
+*credential*.xml
+
+# Logs and generated output
+*.log
 Python/teleport.log
-Powershell/Invoke-RubrikDatabaseMount.ps1
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
