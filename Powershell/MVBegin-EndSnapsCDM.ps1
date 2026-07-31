@@ -6,7 +6,7 @@ This script is to serve as a template for Powershell initiated MV backups with t
 CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 .Example
-./MVBegin-EndSnapsCDM.ps1 -rubrikAddress "10.8.48.104" -serviceAccountJson $serviceAccountJson -MV_ID "ManagedVolume:::30a5645e-c329-443c-82f8-b2b7f5392320"
+./MVBegin-EndSnapsCDM.ps1 -rubrikAddress "rubrik-cluster.example.com" -serviceAccountJson $serviceAccountJson -MV_ID "ManagedVolume:::30a5645e-c329-443c-82f8-b2b7f5392320"
 
 This initiates a begin snapshot, executes the specified script, and then closes the snapshot for MV ManagedVolume:::30a5645e-c329-443c-82f8-b2b7f5392320. 
 

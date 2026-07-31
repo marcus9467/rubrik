@@ -11,7 +11,7 @@ CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 
 .EXAMPLE
 
-.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress 10.35.18.192 -VMware -IncludeAll                                                                            
+.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress rubrik-cluster.example.com -VMware -IncludeAll                                                                            
 cmdlet Get-SnapshotDetails.ps1 at command pipeline position 1
 Supply values for the following parameters:
 (Type !? for Help.)
@@ -25,7 +25,7 @@ This will run the script with 16 threads to review the snapshots for VMware obje
 
 .EXAMPLE
 
-.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress 10.35.18.192 -AllObjects                                                                            
+.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress rubrik-cluster.example.com -AllObjects                                                                            
 cmdlet Get-SnapshotDetails.ps1 at command pipeline position 1
 Supply values for the following parameters:
 (Type !? for Help.)
@@ -39,7 +39,7 @@ This will run the script and have it look for and determine what object types ar
 
 .EXAMPLE
 
-.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress 10.35.18.192 -SingleObject -ObjectID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579                                                                             
+.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress rubrik-cluster.example.com -SingleObject -ObjectID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579                                                                             
 cmdlet Get-SnapshotDetails.ps1 at command pipeline position 1
 Supply values for the following parameters:
 (Type !? for Help.)
@@ -53,7 +53,7 @@ This will run the script and have it look at only the VMware VM with ID VirtualM
 
 .EXAMPLE
 
-.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress 10.35.18.192 -SingleObject -ObjectID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579 -StorageStats                                                                             
+.\Get-SnapshotDetails.ps1 -threadcount 16 -rubrikAddress rubrik-cluster.example.com -SingleObject -ObjectID VirtualMachine:::c4798261-4798-4fcb-877e-d036843cfeab-vm-579 -StorageStats                                                                             
 cmdlet Get-SnapshotDetails.ps1 at command pipeline position 1
 Supply values for the following parameters:
 (Type !? for Help.)

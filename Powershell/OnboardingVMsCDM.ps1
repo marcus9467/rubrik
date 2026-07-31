@@ -6,7 +6,7 @@ CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 
 
 .EXAMPLE
-OnboardVms.ps1 -rubrikAddress 10.11.12.13 -CSV VMList.csv -slaName "Bronze" -ServiceAccountId "User:::c813f521-c7cd-4ec3-9516-ddaba2369c2e" -ServiceAccountSecret "AB9duc+bXVUwfsCqk14norv98ubcdQazyWU8DSWBZxPZpRnOGb72x8wav6eGmkAK7ZLbpFAKjuHUe/C5QMxA"
+OnboardVms.ps1 -rubrikAddress rubrik-cluster.example.com -CSV VMList.csv -slaName "Bronze" -ServiceAccountId "User:::c813f521-c7cd-4ec3-9516-ddaba2369c2e" -ServiceAccountSecret "AB9duc+bXVUwfsCqk14norv98ubcdQazyWU8DSWBZxPZpRnOGb72x8wav6eGmkAK7ZLbpFAKjuHUe/C5QMxA"
 
 This will import the list of VMs from the referenced CSV, register the agent to the individual VM, and apply SLA Bronze to the VMs
 

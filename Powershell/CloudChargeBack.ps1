@@ -17,7 +17,7 @@ CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFT
 Filteres the output to only include tags with Kubernetes in the key value.
 
 .NOTES
-    Author  : Tony Koziana <Tony.Koziana@rubrik.com> and Marcus Henderson <marcus.henderson@rubrik.com
+    Author  : Tony Koziana <Tony.Koziana@rubrik.com> and Marcus Henderson <marcus.henderson@rubrik.com>
     Created : May 23, 2024
     Company : Rubrik Inc
 #>

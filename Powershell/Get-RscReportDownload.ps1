@@ -8,7 +8,7 @@ This script will initate a prepare file job so that a CSV can be downloaded of a
 This will download the requested report to the specified location. Note that the service account json and output location are expected to be customized per environment and specified in the script below.
 
 .NOTES
-    Author  : Marcus Henderson <marcus.henterson@rubrik.com>
+    Author  : Marcus Henderson <marcus.henderson@rubrik.com>
     Created : September 19, 2023
     Updated : July 10, 2025
     Company : Rubrik Inc

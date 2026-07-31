@@ -18,7 +18,7 @@
 # - A Rubrik cluster or EDGE appliance, network access to it and credentials to login
 # - At least 1 sql database protected in Rubrik and therefore 1 windows host
 # - A CSV with the following fields: SourceSQLHostName,SourceInstanceName,SourceDatabaseName,TargetSQLHostName,TargetInstanceName,TargetDatabaseName
-# - Example CSV Line = 172.17.60.69,SQLEXPRESS,SE-JSTENHOUSE-AdventureWorks2016,172.17.60.69,SQLEXPRESS,AdventureWorks2016-LiveMount1
+# - Example CSV Line = sqlhost01.example.com,SQLEXPRESS,SE-JSTENHOUSE-AdventureWorks2016,sqlhost01.example.com,SQLEXPRESS,AdventureWorks2016-LiveMount1
 # - All options specified are tested to see if they exist in Rubrik
 # - This script always mounts the latest snapshot available
 ##################################
@@ -245,7 +245,7 @@ function Get-RubrikMssqlDatabase {
     .PARAMETER MssqlDbId
         The unique ID of the MS SQL database you want to retrieve.
     .PARAMETER BaseUrl
-        The base URL of the Rubrik cluster API (e.g., "https://10.8.49.104/api/v1").
+        The base URL of the Rubrik cluster API (e.g., "https://rubrik-cluster.example.com/api/v1").
     .PARAMETER ApiParams
         A hashtable containing the required parameters for the API call, such as
         headers for authentication and any certificate handling flags.

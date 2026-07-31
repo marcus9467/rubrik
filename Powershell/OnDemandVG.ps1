@@ -6,7 +6,7 @@ This script is to serve as a template for Powershell initiated VG backups with s
 CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 .Example
-./OndemandVG.ps1 -rubrikAddress "10.8.48.104" -ServiceAccountJson $serviceAccountJson -VG_ID "VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c"
+./OndemandVG.ps1 -rubrikAddress "rubrik-cluster.example.com" -ServiceAccountJson $serviceAccountJson -VG_ID "VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c"
 
 This initiates a snapshot for VG VolumeGroup:::c35db8d3-cee3-4212-9c87-554579f6d02c.
 

@@ -1,7 +1,7 @@
 <#
 
 .SYNOPSIS
-This script will onboard new MSSQL hosts based on a provided CSV file and then later assign protection to MSSQL Databases. 
+This script will generate a list of Linux and Unix hosts currently registered to Rubrik Security Cloud. 
 
 .EXAMPLE
 ./Get-RegisteredLinuxHosts.ps1 -ServiceAccountJson $serviceaccountJson 
