@@ -1,0 +1,67 @@
+function disconnect-RSC {
+.SYNOPSIS
+    Function to disconnect the previously established session. 
+    
+    CODE HERE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+    .EXAMPLE
+    disconnect-polaris -logoutURL $logoutURL
+    
+    Disconnects the previously created session. Note that $logoutURL is previously populated by the connect-polaris function.
+   
+    .NOTES
+    Author  : Marcus Henderson <marcus.henderson@rubrik.com>
+    Created : May 08, 2023
+    Company : Rubrik Inc
+    #>
+
+    [CmdletBinding()]
+
+    param (
+        [parameter(Mandatory=$true)]
+        [string]$logoutUrl
+    )
+
+   
+
+    begin {
+
+ 
+
+    }
+
+   
+
+    process {
+
+        try{
+
+            $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
+
+        }
+
+        catch [System.Management.Automation.ParameterBindingException]{
+
+            Write-Error("Failed to logout. Error $($_)")
+
+        }
+
+    }
+
+   
+
+    end {
+
+            if({$closeStatus -eq 204}){
+
+                Write-Output("Successfully logged out")
+
+            } else {
+
+                Write-Error("Error $($_)")
+
+            }
+
+        }
+
+}
