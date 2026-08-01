@@ -60,7 +60,7 @@ Workflows that get exercised under pressure, so they're built to be re-run safel
 ### Cost, capacity & reporting
 - `CloudChargeBack.ps1` — cloud storage chargeback by tag
 - `DetectDoubleDippersRSC.ps1` — duplicate protection detection
-- `RubrikComputeSizing.py` — compute sizing analysis
+- `RubrikComputeSizing.py` — theoretical minimum node count from a Protection Task Details CSV
 - `Get-RscReportDownload.ps1` — programmatic report export from RSC
 
 ### Application-consistent & on-demand backup
@@ -81,7 +81,13 @@ Workflows that get exercised under pressure, so they're built to be re-run safel
 - A Rubrik CDM cluster or Rubrik Security Cloud tenant
 - An RSC service account JSON (most newer scripts) or CDM credentials (legacy CDM scripts)
 - PowerShell 7+ for the PowerShell scripts
-- Python 3.8+ with `requests` for the Python scripts
+- Python 3.8+ for the Python scripts
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+`requests` covers most RSC/CDM scripts; `pandas` / `numpy` are used by `RubrikComputeSizing.py`.
 
 ### Authentication
 

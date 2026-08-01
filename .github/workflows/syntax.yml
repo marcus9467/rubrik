@@ -1,0 +1,54 @@
+name: Syntax
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python scripts
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find Python -type f -name '*.py' | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Python files found"
+            exit 1
+          fi
+          python -m py_compile "${files[@]}"
+          echo "Compiled ${#files[@]} Python files"
+
+  powershell:
+    name: PowerShell parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem -Path Powershell -Recurse -Filter *.ps1 | Sort-Object FullName
+          if (-not $files) { throw 'No PowerShell files found' }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors -and $errors.Count -gt 0) {
+              foreach ($err in $errors) {
+                Write-Host ("{0}:{1}: {2}" -f $file.FullName, $err.Extent.StartLineNumber, $err.Message)
+              }
+              throw "Parse errors in $($file.FullName)"
+            }
+          }
+          Write-Host "Parsed $($files.Count) PowerShell files"
