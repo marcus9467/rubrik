@@ -6,13 +6,13 @@
 .DESCRIPTION
     New-EhrCredentials.ps1 is an interactive wizard that walks through five steps:
 
-      Step 1 — MBF username and password (DPAPI-encrypted in output file).
-      Step 2 — MBF Intermediary host(s) (e.g. RUB-MBI:2987).
-      Step 3 — RSC service account. Load from an existing JSON file or enter manually.
+      Step 1 - MBF username and password (DPAPI-encrypted in output file).
+      Step 2 - MBF Intermediary host(s) (e.g. RUB-MBI:2987).
+      Step 3 - RSC service account. Load from an existing JSON file or enter manually.
                The client_secret is stored as a DPAPI-encrypted SecureString.
-      Step 4 — RSC Retention SLA ID (UUID). Use -ListSlas on EHRMasterScript.ps1
+      Step 4 - RSC Retention SLA ID (UUID). Use -ListSlas on EHRMasterScript.ps1
                to find this value.
-      Step 5 — GCP Project ID filter (optional). Use -ListProjects on
+      Step 5 - GCP Project ID filter (optional). Use -ListProjects on
                EHRMasterScript.ps1 to find this value.
 
     All data is exported to a single DPAPI-encrypted XML file via Export-Clixml.
@@ -49,7 +49,7 @@
 
 .EXAMPLE
     # Re-run to update credentials or re-register the scheduled task.
-    # The existing XML file will be overwritten — have all credentials ready.
+    # The existing XML file will be overwritten - have all credentials ready.
     .\New-EhrCredentials.ps1
 
 .NOTES
@@ -71,7 +71,7 @@
     SECURITY MODEL
     --------------
     - MBF password and RSC client_secret are stored as SecureString in the XML.
-      Export-Clixml encrypts these fields using Windows DPAPI — they cannot be read
+      Export-Clixml encrypts these fields using Windows DPAPI - they cannot be read
       by any other user or on any other machine.
     - All other fields (client_id, access_token_uri, SLA ID, GCP project, etc.) are
       stored as plain strings. They are configuration values, not secrets.
@@ -81,7 +81,7 @@
 
     RELATED SCRIPTS
     ---------------
-    EHRMasterScript.ps1 — Operational backup script that consumes this credential file.
+    EHRMasterScript.ps1 - Operational backup script that consumes this credential file.
 #>
 param (
     [Parameter()]
@@ -226,15 +226,15 @@ if (-not (Test-Path $outputDir)) {
 # BUILD AND EXPORT
 # -----------------------------------------------------------------------------
 # Export-Clixml DPAPI-encrypts SecureString fields (MBF password, RSC client secret).
-# All other fields are stored as plain strings — they are not sensitive secrets.
+# All other fields are stored as plain strings - they are not sensitive secrets.
 $credStore = [PSCustomObject]@{
     # MBF
-    MbfCredential   = $mbfCredential           # PSCredential  — DPAPI encrypted
+    MbfCredential   = $mbfCredential           # PSCredential  - DPAPI encrypted
     MbfIntermediary = $intermediaryNormalized   # plain string
 
     # RSC Service Account
     RscClientId     = $rscClientId             # plain string
-    RscClientSecret = $rscClientSecret         # SecureString  — DPAPI encrypted
+    RscClientSecret = $rscClientSecret         # SecureString  - DPAPI encrypted
     RscTokenUri     = $rscTokenUri             # plain string
     RscName         = $rscName                 # plain string
 
@@ -276,7 +276,7 @@ if ($createTask -match '^[Yy]') {
 
     if ([string]::IsNullOrWhiteSpace($masterScriptPath) -or -not (Test-Path $masterScriptPath)) {
         Write-Warning "Script not found at '$masterScriptPath'. Skipping task registration."
-        Write-Warning "You can register the task manually — see instructions at the end of this output."
+        Write-Warning "You can register the task manually - see instructions at the end of this output."
     } else {
 
         # --- TASK NAME ---
@@ -299,7 +299,7 @@ if ($createTask -match '^[Yy]') {
             $hoursInput = (Read-Host "Run every how many hours? (e.g. 4, 6, 12)").Trim()
             [int]$intervalHours = 0
             if (-not [int]::TryParse($hoursInput, [ref]$intervalHours) -or $intervalHours -lt 1 -or $intervalHours -gt 23) {
-                Write-Warning "Invalid value — defaulting to every 6 hours."
+                Write-Warning "Invalid value - defaulting to every 6 hours."
                 $intervalHours = 6
             }
             # Start at the next clean hour boundary
@@ -312,7 +312,7 @@ if ($createTask -match '^[Yy]') {
             $runTime   = if ([string]::IsNullOrWhiteSpace($timeInput)) { "02:00" } else { $timeInput }
             # Validate the time format loosely
             if ($runTime -notmatch '^\d{1,2}:\d{2}$') {
-                Write-Warning "Unrecognised time format '$runTime' — defaulting to 02:00."
+                Write-Warning "Unrecognised time format '$runTime' - defaulting to 02:00."
                 $runTime = "02:00"
             }
             $trigger = New-ScheduledTaskTrigger -Daily -At $runTime
@@ -345,7 +345,7 @@ if ($createTask -match '^[Yy]') {
             Register-ScheduledTask `
                 -TaskName    $taskName `
                 -TaskPath    "\Rubrik\" `
-                -Description "Rubrik EHR GCP backup orchestration — quiesce, snapshot, unquiesce." `
+                -Description "Rubrik EHR GCP backup orchestration - quiesce, snapshot, unquiesce." `
                 -Trigger     $trigger `
                 -Action      $action `
                 -Settings    $settings `

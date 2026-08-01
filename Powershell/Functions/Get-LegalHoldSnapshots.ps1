@@ -43,8 +43,8 @@ function Get-LegalHoldSnapshots {
             __typename
           }
         }
-        "@
-        
+"@
+
         $variables = @{
           "input" = @{
             "sortParam" = @{

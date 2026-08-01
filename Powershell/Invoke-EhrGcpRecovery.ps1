@@ -100,8 +100,8 @@
 
 .PARAMETER InstanceNameSuffix
     [Export only] Suffix appended to each source VM name to form the recovered instance name.
-    Must produce a valid GCE instance name after sanitization (lowercase, hyphens, ≤63 chars).
-    Default: "-rcv-<YYYYMMDD>" (e.g. MTFS01 → mtfs01-rcv-20260325).
+    Must produce a valid GCE instance name after sanitization (lowercase, hyphens, <=63 chars).
+    Default: "-rcv-<YYYYMMDD>" (e.g. MTFS01 -> mtfs01-rcv-20260325).
 
 .PARAMETER ListSnapshots
     Switch. Lists available recovery points for selected VMs and exits without recovering.
@@ -120,7 +120,7 @@
     Default: C:\ProgramData\Rubrik\Logs\EHRRecovery.log
 
 .EXAMPLE
-    # Fully guided — prompts for all required values interactively.
+    # Fully guided - prompts for all required values interactively.
     .\Invoke-EhrGcpRecovery.ps1 -MbfConfigXml "C:\ProgramData\Rubrik\EHRCreds.xml"
 
 .EXAMPLE
@@ -169,8 +169,8 @@
 
     RELATED SCRIPTS
     ---------------
-    EHRMasterScript.ps1    — Backup orchestration (quiesce, snapshot, unquiesce).
-    New-EhrCredentials.ps1 — One-time credential setup wizard.
+    EHRMasterScript.ps1    - Backup orchestration (quiesce, snapshot, unquiesce).
+    New-EhrCredentials.ps1 - One-time credential setup wizard.
 #>
 [CmdletBinding(DefaultParameterSetName = "RunRecovery")]
 param (
@@ -597,7 +597,7 @@ query GcpOldestSnapshotQuery(`$snappableId: String!, `$first: Int, `$sortBy: Sna
         "snappableId" = $SnappableId
         "first"       = 1
         "sortBy"      = "CREATION_TIME"
-        "sortOrder"   = "ASC"   # Ascending → first result is the oldest snapshot
+        "sortOrder"   = "ASC"   # Ascending -> first result is the oldest snapshot
     }
 
     $payload = @{ query = $query; variables = $variables }
@@ -734,7 +734,7 @@ mutation ExportGCPInstanceMutation(`$input: GcpNativeExportGceInstanceInput!) {
 # =============================================================================
 
 function Format-GcpInstanceName {
-    # GCE instance names: 1–63 chars, lowercase letters/numbers/hyphens,
+    # GCE instance names: 1-63 chars, lowercase letters/numbers/hyphens,
     # must start with a letter, must not end with a hyphen.
     param ([string]$RawName)
 
@@ -874,7 +874,7 @@ try {
                 $targetVms += $match
             }
             else {
-                Write-Log "    VM '$name' was not found in RSC inventory — skipping." -Level Warning
+                Write-Log "    VM '$name' was not found in RSC inventory - skipping." -Level Warning
             }
         }
         if ($targetVms.Count -eq 0) {
@@ -908,7 +908,7 @@ try {
                     $targetVms += $inventory[$i]
                 }
                 else {
-                    Write-Log "    '$idx' is out of range — ignored." -Level Warning
+                    Write-Log "    '$idx' is out of range - ignored." -Level Warning
                 }
             }
         }
@@ -1158,7 +1158,7 @@ try {
                 }
             }
             else {
-                Write-Log "    No projects returned — entering manually." -Level Warning
+                Write-Log "    No projects returned - entering manually." -Level Warning
                 if (-not $TargetProjectRubrikId) {
                     $TargetProjectRubrikId = (Read-Host "    Target Project RSC UUID").Trim().Trim('"').Trim("'")
                 }
@@ -1241,7 +1241,7 @@ try {
         Write-Log "  Recovered instance names will be:" -ForegroundColor DarkGray
         foreach ($item in $recoveryPlan) {
             $preview = Format-GcpInstanceName -RawName ($item.VmName + $InstanceNameSuffix)
-            Write-Log ("    {0,-30} → {1}" -f $item.VmName, $preview) -ForegroundColor DarkGray
+            Write-Log ("    {0,-30} -> {1}" -f $item.VmName, $preview) -ForegroundColor DarkGray
         }
     }
 
@@ -1260,7 +1260,7 @@ try {
     foreach ($item in $recoveryPlan) {
         if ($RecoveryType -eq "Export") {
             $targetName = Format-GcpInstanceName -RawName ($item.VmName + $exportParams.InstanceNameSuffix)
-            Write-Log ("  {0,-25}  →  {1}" -f $item.VmName, $targetName) -ForegroundColor White
+            Write-Log ("  {0,-25}  ->  {1}" -f $item.VmName, $targetName) -ForegroundColor White
         }
         else {
             Write-Log ("  {0,-25}  (in-place restore)" -f $item.VmName) -ForegroundColor White
@@ -1304,7 +1304,7 @@ try {
                     -SnapshotId  $item.SnapshotId `
                     -ShouldStartRestoredInstance $shouldPowerOn
 
-                Write-Log "    $($item.VmName) : Restore job initiated — Job ID: $jobId" -ForegroundColor Green
+                Write-Log "    $($item.VmName) : Restore job initiated - Job ID: $jobId" -ForegroundColor Green
 
                 $results += [PSCustomObject]@{
                     VmName       = $item.VmName
@@ -1331,7 +1331,7 @@ try {
                     -ServiceAccountId             $exportParams.ServiceAccountEmail `
                     -ShouldPowerOff               $exportParams.ShouldPowerOff
 
-                Write-Log "    $($item.VmName) → $targetName : Export job initiated — Job ID: $jobId" -ForegroundColor Green
+                Write-Log "    $($item.VmName) -> $targetName : Export job initiated - Job ID: $jobId" -ForegroundColor Green
 
                 $results += [PSCustomObject]@{
                     VmName       = $item.VmName

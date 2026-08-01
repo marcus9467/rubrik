@@ -85,7 +85,7 @@ function Connect-RubrikCdm {
 
 function New-RubrikHeader {
     # Refresh the token if it is older than 3 hours
-    if ((Get-Date) - $global:authTime).TotalHours -ge 3 {
+    if (((Get-Date) - $global:authTime).TotalHours -ge 3) {
         Write-Output "Token expired, re-authenticating..."
         $global:connectionInfo = Connect-RubrikCdm -rubrikAddress $rubrikAddress -serviceAccountJson $ServiceAccountJson
     }
