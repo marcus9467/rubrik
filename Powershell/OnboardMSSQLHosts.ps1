@@ -26,12 +26,18 @@ Phase 3: Build the assignment plan (-GenerateOnboardMSSQLCSV)
   the current SLA for every instance. This file is meant for human review before anything is
   changed. Leave failoverClusterName blank (or set it to "NULL") for standalone hosts and
   availability groups. Populate it only when the server belongs to a SQL failover cluster.
+  Add -UnprotectedOnly to emit only instances (or AGs) whose current effective SLA is
+  Unprotected. This is important because SQL protection is evaluated at the instance/AG grain,
+  not the host grain: a Windows host almost always shows as Unprotected even when the instance
+  under it already has an SLA, so filtering on the host alone is not reliable.
   Requires: -CSV, -clusterId.
  
-Phase 4: Assign the SLAs (-AssignSLA [-batched])
+Phase 4: Assign the SLAs (-AssignSLA [-batched] [-SlaId <guid>])
   Reads the reviewed mssqlAssignmentList CSV and applies the slaId to each instanceId. Add
   -batched to group up to 50 instances per SLA into a single API call, which is recommended for
-  large runs. Writes AssignedSLAMSSQL-<date>.csv as a record of what was sent. Requires: -CSV.
+  large runs. Pass -SlaId to override the per-row slaId column and assign that one SLA to every
+  object in the CSV, which is handy when the whole list should land on a single SLA. Writes
+  AssignedSLAMSSQL-<date>.csv as a record of what was sent. Requires: -CSV.
  
 Phase 5: Validate against CDM (-cdmValidate)
   Reads the assignment CSV and queries the local Rubrik cluster directly (not RSC) to confirm
@@ -53,8 +59,14 @@ Generates a CSV of unprotected MSSQL Hosts for use with the MSSQL onboarding pro
 Generates a CSV that shows the proposed new SLA assignment as well as the current assignment. This allows for human review before sending the generated CSV to the actual assignment phase.
 serverName,SlaId,failoverClusterName
 .EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -GenerateOnboardMSSQLCSV -clusterId $clusterId -UnprotectedOnly
+Same as the GenerateOnboardMSSQLCSV example above, but only includes MSSQL instances (and availability groups) whose current effective SLA is Unprotected. Protection is evaluated at the instance grain rather than the host grain.
+.EXAMPLE
 ./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./onboardhoststest.csv -AssignSLA -batched  -clusterId $clusterId
 Assigns the SLAs proposed in the prior step's CSV. Can be batched to group up to 50 MSSQL instances in each API call.
+.EXAMPLE
+./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceaccountJson -CSV ./mssqlAssignmentList-202403281151.csv -AssignSLA -batched -SlaId "b407f295-5c6f-5e58-aa36-9ba0862b6f63"
+Assigns a single SLA to every object in the CSV, ignoring the per-row slaId column. Useful when the whole list should land on one SLA.
 .EXAMPLE
 ./OnboardMSSQLHosts.ps1 -ServiceAccountJson $serviceAccountJson -clusterId $clusterId -cdmValidate -CSV ./mssqlAssignmentList-202403281151.csv -clusterIP "rubrik-cluster.example.com"
 Validates the SLA assignment with the local CDM using the CSV produced by either the AssignSLA or GenerateOnboardMSSQLCSV flags, and produces a CSV for human review.
@@ -68,7 +80,7 @@ param (
     [parameter(Mandatory=$true)]
     [string]$ServiceAccountJson,
     [parameter(Mandatory=$false)]
-    [string]$SlaIds,
+    [string]$SlaId,
     [parameter(Mandatory=$false)]
     [string]$CSV,
     [parameter(Mandatory=$false)]
@@ -85,6 +97,8 @@ param (
     [switch]$GenerateOnboardMSSQLCSV,
     [parameter(Mandatory=$false)]
     [switch]$AssignSLA,
+    [parameter(Mandatory=$false)]
+    [switch]$UnprotectedOnly,
     [parameter(Mandatory=$false)]
     [string]$clusterIP,
     [parameter(Mandatory=$false)]
@@ -2562,6 +2576,11 @@ if($GenerateOnboardMSSQLCSV){
         $FC = $FCinfo | Where-Object {$_.name -match $WindowsMachine.failoverClusterName}
         $instanceList = $FC.instanceDescendantConnection.edges.node
         foreach($instance in $instanceList){
+          if($UnprotectedOnly){
+            $curId = ($instance.effectiveSlaDomain).id
+            $curName = ($instance.effectiveSlaDomain).name
+            if(-not ([string]::IsNullOrEmpty($curId) -or $curId -eq "UNPROTECTED" -or $curName -eq "Unprotected")){ continue }
+          }
           Write-Host ("Gathering Information for FC " + $FC.Name)
           $FCObject = New-Object PSobject
           $FCObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $WindowsMachine.ServerName
@@ -2580,6 +2599,11 @@ if($GenerateOnboardMSSQLCSV){
         #Availability Groups
         ForEach($AG in $AGInfo){
             if((($AG.instances).logicalPath).name -match $objectName.Servername){
+                if($UnprotectedOnly){
+                  $curId = ($AG.effectiveSlaDomain).id
+                  $curName = ($AG.effectiveSlaDomain).name
+                  if(-not ([string]::IsNullOrEmpty($curId) -or $curId -eq "UNPROTECTED" -or $curName -eq "Unprotected")){ continue }
+                }
                 Write-Host ("Gathering Information for AG " + $AG.Name)
                 $mssqlObject = New-Object PSobject
                 $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
@@ -2599,6 +2623,11 @@ if($GenerateOnboardMSSQLCSV){
               if(($SQLHost).name -match $objectName.servername){
                 $instanceList = $sqlHost.instanceDescendantConnection.edges.node
                 foreach($instance in $instanceList){
+                        if($UnprotectedOnly){
+                          $curId = ($instance.effectiveSlaDomain).id
+                          $curName = ($instance.effectiveSlaDomain).name
+                          if(-not ([string]::IsNullOrEmpty($curId) -or $curId -eq "UNPROTECTED" -or $curName -eq "Unprotected")){ continue }
+                        }
                         Write-Host ("Gathering Information for SQLHost " + $objectName.ServerName)
                         $mssqlObject = New-Object PSobject
                         $mssqlObject | Add-Member -NotePropertyName "hostName" -NotePropertyValue $objectName.ServerName
@@ -2624,6 +2653,12 @@ if($AssignSLA){
   $AssignmentObjects = Import-Csv $CSV
   $Output_directory = (Get-Location).path
   $mdate = (Get-Date).tostring("yyyyMMddHHmm")
+  if(-not [string]::IsNullOrEmpty($SlaId)){
+    Write-Host ("Overriding the slaId for every object in the CSV with the supplied SLA ID " + $SlaId)
+    foreach($obj in $AssignmentObjects){
+      $obj | Add-Member -NotePropertyName "slaId" -NotePropertyValue $SlaId -Force
+    }
+  }
   if($batched){
     # Assuming $AssignmentObjects is already populated
     # Group by SLAId
