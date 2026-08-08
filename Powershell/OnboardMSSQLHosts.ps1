@@ -6,19 +6,19 @@ The script runs in five phases. Each phase is selected by its own switch and han
 the next phase, so you can review the output before continuing. All phases authenticate with
 the RSC service account JSON passed to -ServiceAccountJson (Phase 5 also opens a direct session
 to the cluster named in -clusterIP).
- 
+
 Phase 1: Register hosts (-OnboardHosts)
   Reads the "serverName" column from the supplied CSV and registers each Windows host on the
   target cluster. Once a host is registered, RSC discovers the MSSQL instances and databases
   running on it. Any failures are written to MissingHostsReport_<date>.csv for later review.
   Requires: -CSV, -clusterId.
- 
+
 Phase 2: Inventory unprotected MSSQL (-GatherMSSQLHosts)
   Discovery helper. Queries the cluster for unprotected standalone hosts, availability groups,
   and failover clusters, then writes UnprotectedMssqlHosts<date>.csv with the columns
   ServerName, hostId, slaId, and assignmentType. Use this to see what still needs an SLA. This
   is an optional step and can be run at any time. Requires: -clusterId.
- 
+
 Phase 3: Build the assignment plan (-GenerateOnboardMSSQLCSV)
   Reads an input CSV with the columns serverName, slaId, and failoverClusterName, then resolves
   each server against the current standalone hosts, availability groups, and failover clusters
@@ -31,19 +31,19 @@ Phase 3: Build the assignment plan (-GenerateOnboardMSSQLCSV)
   not the host grain: a Windows host almost always shows as Unprotected even when the instance
   under it already has an SLA, so filtering on the host alone is not reliable.
   Requires: -CSV, -clusterId.
- 
+
 Phase 4: Assign the SLAs (-AssignSLA [-batched] [-SlaId <guid>])
   Reads the reviewed mssqlAssignmentList CSV and applies the slaId to each instanceId. Add
   -batched to group up to 50 instances per SLA into a single API call, which is recommended for
   large runs. Pass -SlaId to override the per-row slaId column and assign that one SLA to every
   object in the CSV, which is handy when the whole list should land on a single SLA. Writes
   AssignedSLAMSSQL-<date>.csv as a record of what was sent. Requires: -CSV.
- 
+
 Phase 5: Validate against CDM (-cdmValidate)
   Reads the assignment CSV and queries the local Rubrik cluster directly (not RSC) to confirm
   the effective SLA now shows on each database. Writes cdmValidateList-<date>.csv for a final
   human check. Requires: -CSV, -clusterIP.
- 
+
 Typical net-new onboarding: run Phase 1, then Phase 3, then Phase 4, then Phase 5. Phase 2 is
 an optional inventory step. Note that Phase 2's output is an inventory, not a drop-in input for
 Phase 3, because Phase 3 also needs the failoverClusterName column and the target slaId filled
@@ -110,7 +110,7 @@ function connect-rsc {
     param (
         # Service account JSON file
     )
- 
+
     begin {
         # Parse the JSON and build the connection string
         #$serviceAccountObj
@@ -119,7 +119,7 @@ function connect-rsc {
             'client_secret' = $serviceAccountObj.client_secret
         } | ConvertTo-Json
     }
- 
+
     process {
         try{
             $polaris = Invoke-RestMethod -Method Post -uri $serviceAccountObj.access_token_uri -ContentType application/json -body $connectionData
@@ -128,14 +128,14 @@ function connect-rsc {
             Write-Error("The provided JSON has null or empty fields, try the command again with the correct file or redownload the service account JSON from Polaris")
         }
     }
- 
+
     end {
             if($polaris.access_token){
                 Write-Output $polaris
             } else {
                 Write-Error("Unable to connect")
             }
- 
+
         }
 }
 function disconnect-rsc {
@@ -143,11 +143,11 @@ function disconnect-rsc {
     [CmdletBinding()]
     param (
     )
- 
+
     begin {
- 
+
     }
- 
+
     process {
         try{
             $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
@@ -156,7 +156,7 @@ function disconnect-rsc {
             Write-Error("Failed to logout. Error $($_)")
         }
     }
- 
+
     end {
             if($closeStatus -eq 204){
                 Write-Output("Successfully logged out")
@@ -167,7 +167,7 @@ function disconnect-rsc {
 }
 function Get-MssqlHosts{
     [CmdletBinding()]
- 
+
     param (
         [parameter(Mandatory=$true)]
         [string]$clusterId,
@@ -341,7 +341,7 @@ function Get-MssqlHosts{
           __typename
         }
       }
- 
+
       fragment OrganizationsColumnFragment on HierarchyObject {
         allOrgs {
           name
@@ -349,20 +349,20 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment CbtStatusColumnFragment on PhysicalHost {
         cbtStatus
         defaultCbt
         __typename
       }
- 
+
       fragment MssqlNameColumnFragment on HierarchyObject {
         id
         name
         objectType
         __typename
       }
- 
+
       fragment CdmClusterColumnFragment on CdmHierarchyObject {
         replicatedObjectCount
         cluster {
@@ -374,7 +374,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment CdmClusterLabelFragment on CdmHierarchyObject {
         cluster {
           id
@@ -388,7 +388,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment HostChildInstancesEffectiveSlaColumnFragment on PhysicalHost {
         id
         instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
@@ -404,7 +404,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment EffectiveSlaColumnFragment on HierarchyObject {
         id
         effectiveSlaDomain {
@@ -424,7 +424,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment EffectiveSlaDomainFragment on SlaDomain {
         id
         name
@@ -444,7 +444,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment SLADomainFragment on SlaDomain {
         id
         name
@@ -459,7 +459,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
- 
+
       fragment PhysicalHostConnectionStatusColumnFragment on PhysicalHost {
         id
         authorizedOperations
@@ -477,7 +477,7 @@ function Get-MssqlHosts{
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
     $snappableInfo += (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
- 
+
     while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
         $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
         Write-Host ("Looking at End Cursor " + $endCursor)
@@ -670,7 +670,7 @@ function Register-Host{
                 __typename
               }
             }"
- 
+
             $JSON_BODY = @{
                 "variables" = $variables
                 "query" = $query
@@ -697,6 +697,12 @@ function Set-mssqlSlasBatch{
         [string]$ObjectIds
     )
     try{
+        # The GraphQL ids field is a required list ([UUID!]!). PowerShell's ConvertTo-Json
+        # collapses a single element to a scalar (e.g. "guid" instead of ["guid"]), which the
+        # API rejects. If the supplied ids are not already a JSON array, wrap them in brackets.
+        if($ObjectIds -notmatch '^\s*\['){
+            $ObjectIds = "[$ObjectIds]"
+        }
         $variables = "{
         `"input`": {
           `"updateInfo`": {
@@ -731,6 +737,10 @@ function Set-mssqlSlasBatch{
     }
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
+    $responseErrors = ($result.Content | ConvertFrom-Json).errors
+    if($responseErrors){
+        Write-Error ("SLA assignment API returned errors: " + ($responseErrors.message -join "; "))
+    }
     ((($result.Content | convertfrom-json).data).assignMssqlSlaDomainPropertiesAsync).items
     }
     catch{
@@ -877,7 +887,7 @@ function Get-mssqlAGs{
               __typename
             }
           }
- 
+
           fragment OrganizationsColumnFragment on HierarchyObject {
             allOrgs {
               name
@@ -885,19 +895,19 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment MssqlNameColumnFragment on HierarchyObject {
             id
             name
             objectType
             __typename
           }
- 
+
           fragment AvailabilityGroupDatabaseCopyOnlyColumnFragment on MssqlAvailabilityGroup {
             copyOnly
             __typename
           }
- 
+
           fragment AvailabilityGroupMssqlDatabaseCountColumnFragment on MssqlAvailabilityGroup {
             descendantConnection(filter: `$databaseDescendantFilter, typeFilter: [Mssql]) {
               count
@@ -905,7 +915,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment CdmClusterColumnFragment on CdmHierarchyObject {
             replicatedObjectCount
             cluster {
@@ -917,7 +927,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment CdmClusterLabelFragment on CdmHierarchyObject {
             cluster {
               id
@@ -931,7 +941,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment EffectiveSlaColumnFragment on HierarchyObject {
             id
             effectiveSlaDomain {
@@ -951,7 +961,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment EffectiveSlaDomainFragment on SlaDomain {
             id
             name
@@ -971,7 +981,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment SLADomainFragment on SlaDomain {
             id
             name
@@ -986,12 +996,12 @@ function Get-mssqlAGs{
             }
             __typename
           }
- 
+
           fragment SlaAssignmentColumnFragment on HierarchyObject {
             slaAssignment
             __typename
           }
- 
+
           fragment AvailabilityGroupInstanceColumnFragment on MssqlAvailabilityGroup {
             instances {
               logicalPath {
@@ -1011,7 +1021,7 @@ function Get-mssqlAGs{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
- 
+
         while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
             $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
             Write-Host ("Looking at End Cursor " + $endCursor)
@@ -1122,7 +1132,7 @@ function Get-mssqlAGs{
             $JSON_BODY = $JSON_BODY | ConvertTo-Json
             $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
             $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
- 
+
         }
     }
     catch{
@@ -1131,7 +1141,7 @@ function Get-mssqlAGs{
       finally{
         Write-Output $snappableInfo
       }
- 
+
 }
 function Get-mssqlFCs{
     [CmdletBinding()]
@@ -1292,13 +1302,13 @@ function Get-mssqlFCs{
               __typename
             }
           }
- 
+
           fragment CbtStatusColumnFragment on PhysicalHost {
             cbtStatus
             defaultCbt
             __typename
           }
- 
+
           fragment OrganizationsColumnFragment on HierarchyObject {
             allOrgs {
               name
@@ -1306,14 +1316,14 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment MssqlNameColumnFragment on HierarchyObject {
             id
             name
             objectType
             __typename
           }
- 
+
           fragment CdmClusterColumnFragment on CdmHierarchyObject {
             replicatedObjectCount
             cluster {
@@ -1325,7 +1335,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment CdmClusterLabelFragment on CdmHierarchyObject {
             cluster {
               id
@@ -1339,7 +1349,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment EffectiveSlaColumnFragment on HierarchyObject {
             id
             effectiveSlaDomain {
@@ -1359,7 +1369,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment EffectiveSlaDomainFragment on SlaDomain {
             id
             name
@@ -1381,7 +1391,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment SLADomainFragment on SlaDomain {
             id
             name
@@ -1396,7 +1406,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
- 
+
           fragment ClusterChildInstancesEffectiveSlaColumnFragment on WindowsCluster {
             id
             instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
@@ -1420,7 +1430,7 @@ function Get-mssqlFCs{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $snappableInfo += (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
- 
+
         while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
             $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
             Write-Host ("Looking at End Cursor " + $endCursor)
@@ -1531,7 +1541,7 @@ function Get-mssqlFCs{
             $JSON_BODY = $JSON_BODY | ConvertTo-Json
             $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
             $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
- 
+
         }
     }
     catch{
@@ -1540,7 +1550,7 @@ function Get-mssqlFCs{
       finally{
         Write-Output $snappableInfo
       }
- 
+
 }
 function Get-SLADomains{
   <#
@@ -1661,7 +1671,7 @@ function Get-SLADomains{
             __typename
           }
         }
- 
+
         fragment AllObjectSpecificConfigsForSLAFragment on SlaDomain {
           objectSpecificConfigs {
             awsRdsConfig {
@@ -1790,7 +1800,7 @@ function Get-SLADomains{
           }
           __typename
         }
- 
+
         fragment SnapshotSchedulesForSlaDomainFragment on SnapshotSchedule {
           minute {
             basicSchedule {
@@ -1863,7 +1873,7 @@ function Get-SLADomains{
           }
           __typename
         }
- 
+
         fragment DetailedReplicationSpecsV2ForSlaDomainFragment on ReplicationSpecV2 {
           replicationLocalRetentionDuration {
             duration
@@ -1971,7 +1981,7 @@ function Get-SLADomains{
           }
           __typename
         }
- 
+
         fragment SlaAssignedToOrganizationsFragment on SlaDomain {
           ... on GlobalSlaReply {
             allOrgsWithAccess {
@@ -2175,7 +2185,7 @@ function Get-PhysicalHost{
         __typename
       }
     }
- 
+
     fragment OrganizationsColumnFragment on HierarchyObject {
       allOrgs {
         name
@@ -2183,7 +2193,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment EffectiveSlaDomainFragment on SlaDomain {
       id
       name
@@ -2205,7 +2215,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment SLADomainFragment on SlaDomain {
       id
       name
@@ -2220,7 +2230,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment ClusterNodeConnectionFragment on Cluster {
       clusterNodeConnection {
         nodes {
@@ -2233,7 +2243,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment PhysicalHostConnectionStatusColumnFragment on PhysicalHost {
       id
       authorizedOperations
@@ -2243,7 +2253,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment LinuxFilesetListFragment on LinuxFileset {
       isRelic
       excludes: pathExcluded
@@ -2260,7 +2270,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
- 
+
     fragment WindowsFilesetListFragment on WindowsFileset {
       isRelic
       excludes: pathExcluded
@@ -2392,7 +2402,7 @@ function Connect-RubrikSpecialCdm{
               'secret' = $serviceAccountObj.secret
           } | ConvertTo-Json
           $uriString = "https://$($clusterIp)/api/v1/service_account/session"
- 
+
       $rubrikCdm = Invoke-RestMethod -Method Post -uri $uriString -ContentType application/json -body $connectionData -skipcertificateCheck
     }
     catch{
@@ -2510,7 +2520,7 @@ if($OnboardHosts){
             $clientErrorInfo = New-Object psobject
             $clientErrorInfo | Add-Member -NotePropertyName "Name" -NotePropertyValue $client
             $clientErrorInfo | Add-Member -NotePropertyName "errorMessage" -NotePropertyValue $errorMessage
- 
+
             $MissinghostList += $clientErrorInfo
         }
         $IndexCount++
