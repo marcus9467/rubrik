@@ -6,19 +6,19 @@ The script runs in five phases. Each phase is selected by its own switch and han
 the next phase, so you can review the output before continuing. All phases authenticate with
 the RSC service account JSON passed to -ServiceAccountJson (Phase 5 also opens a direct session
 to the cluster named in -clusterIP).
-
+ 
 Phase 1: Register hosts (-OnboardHosts)
   Reads the "serverName" column from the supplied CSV and registers each Windows host on the
   target cluster. Once a host is registered, RSC discovers the MSSQL instances and databases
   running on it. Any failures are written to MissingHostsReport_<date>.csv for later review.
   Requires: -CSV, -clusterId.
-
+ 
 Phase 2: Inventory unprotected MSSQL (-GatherMSSQLHosts)
   Discovery helper. Queries the cluster for unprotected standalone hosts, availability groups,
   and failover clusters, then writes UnprotectedMssqlHosts<date>.csv with the columns
   ServerName, hostId, slaId, and assignmentType. Use this to see what still needs an SLA. This
   is an optional step and can be run at any time. Requires: -clusterId.
-
+ 
 Phase 3: Build the assignment plan (-GenerateOnboardMSSQLCSV)
   Reads an input CSV with the columns serverName, slaId, and failoverClusterName, then resolves
   each server against the current standalone hosts, availability groups, and failover clusters
@@ -31,19 +31,19 @@ Phase 3: Build the assignment plan (-GenerateOnboardMSSQLCSV)
   not the host grain: a Windows host almost always shows as Unprotected even when the instance
   under it already has an SLA, so filtering on the host alone is not reliable.
   Requires: -CSV, -clusterId.
-
+ 
 Phase 4: Assign the SLAs (-AssignSLA [-batched] [-SlaId <guid>])
   Reads the reviewed mssqlAssignmentList CSV and applies the slaId to each instanceId. Add
   -batched to group up to 50 instances per SLA into a single API call, which is recommended for
   large runs. Pass -SlaId to override the per-row slaId column and assign that one SLA to every
   object in the CSV, which is handy when the whole list should land on a single SLA. Writes
   AssignedSLAMSSQL-<date>.csv as a record of what was sent. Requires: -CSV.
-
+ 
 Phase 5: Validate against CDM (-cdmValidate)
   Reads the assignment CSV and queries the local Rubrik cluster directly (not RSC) to confirm
   the effective SLA now shows on each database. Writes cdmValidateList-<date>.csv for a final
   human check. Requires: -CSV, -clusterIP.
-
+ 
 Typical net-new onboarding: run Phase 1, then Phase 3, then Phase 4, then Phase 5. Phase 2 is
 an optional inventory step. Note that Phase 2's output is an inventory, not a drop-in input for
 Phase 3, because Phase 3 also needs the failoverClusterName column and the target slaId filled
@@ -104,13 +104,21 @@ param (
     [parameter(Mandatory=$false)]
     [switch]$cdmValidate
 )
+# Windows PowerShell 5.1 has no -SkipCertificateCheck on Invoke-WebRequest / Invoke-RestMethod.
+# Build a splat so PowerShell 6+ uses the native switch, and 5.1 falls back to a trust-all
+# certificate policy that is set up in the cdmValidate block where the self-signed CDM cert is hit.
+if($PSVersionTable.PSVersion.Major -ge 6){
+    $certSkipParam = @{ SkipCertificateCheck = $true }
+} else {
+    $certSkipParam = @{}
+}
 function connect-rsc {
     # Function that uses the Polaris/RSC Service Account JSON and opens a new session, and returns the session temp token
     [CmdletBinding()]
     param (
         # Service account JSON file
     )
-
+ 
     begin {
         # Parse the JSON and build the connection string
         #$serviceAccountObj
@@ -119,7 +127,7 @@ function connect-rsc {
             'client_secret' = $serviceAccountObj.client_secret
         } | ConvertTo-Json
     }
-
+ 
     process {
         try{
             $polaris = Invoke-RestMethod -Method Post -uri $serviceAccountObj.access_token_uri -ContentType application/json -body $connectionData
@@ -128,14 +136,14 @@ function connect-rsc {
             Write-Error("The provided JSON has null or empty fields, try the command again with the correct file or redownload the service account JSON from Polaris")
         }
     }
-
+ 
     end {
             if($polaris.access_token){
                 Write-Output $polaris
             } else {
                 Write-Error("Unable to connect")
             }
-
+ 
         }
 }
 function disconnect-rsc {
@@ -143,11 +151,11 @@ function disconnect-rsc {
     [CmdletBinding()]
     param (
     )
-
+ 
     begin {
-
+ 
     }
-
+ 
     process {
         try{
             $closeStatus = $(Invoke-WebRequest -Method Delete -Headers $headers -ContentType "application/json; charset=utf-8" -Uri $logoutUrl).StatusCode
@@ -156,7 +164,7 @@ function disconnect-rsc {
             Write-Error("Failed to logout. Error $($_)")
         }
     }
-
+ 
     end {
             if($closeStatus -eq 204){
                 Write-Output("Successfully logged out")
@@ -167,7 +175,7 @@ function disconnect-rsc {
 }
 function Get-MssqlHosts{
     [CmdletBinding()]
-
+ 
     param (
         [parameter(Mandatory=$true)]
         [string]$clusterId,
@@ -341,7 +349,7 @@ function Get-MssqlHosts{
           __typename
         }
       }
-
+ 
       fragment OrganizationsColumnFragment on HierarchyObject {
         allOrgs {
           name
@@ -349,20 +357,20 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment CbtStatusColumnFragment on PhysicalHost {
         cbtStatus
         defaultCbt
         __typename
       }
-
+ 
       fragment MssqlNameColumnFragment on HierarchyObject {
         id
         name
         objectType
         __typename
       }
-
+ 
       fragment CdmClusterColumnFragment on CdmHierarchyObject {
         replicatedObjectCount
         cluster {
@@ -374,7 +382,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment CdmClusterLabelFragment on CdmHierarchyObject {
         cluster {
           id
@@ -388,7 +396,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment HostChildInstancesEffectiveSlaColumnFragment on PhysicalHost {
         id
         instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
@@ -404,7 +412,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment EffectiveSlaColumnFragment on HierarchyObject {
         id
         effectiveSlaDomain {
@@ -424,7 +432,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment EffectiveSlaDomainFragment on SlaDomain {
         id
         name
@@ -444,7 +452,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment SLADomainFragment on SlaDomain {
         id
         name
@@ -459,7 +467,7 @@ function Get-MssqlHosts{
         }
         __typename
       }
-
+ 
       fragment PhysicalHostConnectionStatusColumnFragment on PhysicalHost {
         id
         authorizedOperations
@@ -477,7 +485,7 @@ function Get-MssqlHosts{
     $JSON_BODY = $JSON_BODY | ConvertTo-Json
     $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
     $snappableInfo += (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
-
+ 
     while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
         $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
         Write-Host ("Looking at End Cursor " + $endCursor)
@@ -670,7 +678,7 @@ function Register-Host{
                 __typename
               }
             }"
-
+ 
             $JSON_BODY = @{
                 "variables" = $variables
                 "query" = $query
@@ -887,7 +895,7 @@ function Get-mssqlAGs{
               __typename
             }
           }
-
+ 
           fragment OrganizationsColumnFragment on HierarchyObject {
             allOrgs {
               name
@@ -895,19 +903,19 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment MssqlNameColumnFragment on HierarchyObject {
             id
             name
             objectType
             __typename
           }
-
+ 
           fragment AvailabilityGroupDatabaseCopyOnlyColumnFragment on MssqlAvailabilityGroup {
             copyOnly
             __typename
           }
-
+ 
           fragment AvailabilityGroupMssqlDatabaseCountColumnFragment on MssqlAvailabilityGroup {
             descendantConnection(filter: `$databaseDescendantFilter, typeFilter: [Mssql]) {
               count
@@ -915,7 +923,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment CdmClusterColumnFragment on CdmHierarchyObject {
             replicatedObjectCount
             cluster {
@@ -927,7 +935,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment CdmClusterLabelFragment on CdmHierarchyObject {
             cluster {
               id
@@ -941,7 +949,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment EffectiveSlaColumnFragment on HierarchyObject {
             id
             effectiveSlaDomain {
@@ -961,7 +969,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment EffectiveSlaDomainFragment on SlaDomain {
             id
             name
@@ -981,7 +989,7 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment SLADomainFragment on SlaDomain {
             id
             name
@@ -996,12 +1004,12 @@ function Get-mssqlAGs{
             }
             __typename
           }
-
+ 
           fragment SlaAssignmentColumnFragment on HierarchyObject {
             slaAssignment
             __typename
           }
-
+ 
           fragment AvailabilityGroupInstanceColumnFragment on MssqlAvailabilityGroup {
             instances {
               logicalPath {
@@ -1021,7 +1029,7 @@ function Get-mssqlAGs{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
-
+ 
         while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
             $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
             Write-Host ("Looking at End Cursor " + $endCursor)
@@ -1132,7 +1140,7 @@ function Get-mssqlAGs{
             $JSON_BODY = $JSON_BODY | ConvertTo-Json
             $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
             $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
-
+ 
         }
     }
     catch{
@@ -1141,7 +1149,7 @@ function Get-mssqlAGs{
       finally{
         Write-Output $snappableInfo
       }
-
+ 
 }
 function Get-mssqlFCs{
     [CmdletBinding()]
@@ -1302,13 +1310,13 @@ function Get-mssqlFCs{
               __typename
             }
           }
-
+ 
           fragment CbtStatusColumnFragment on PhysicalHost {
             cbtStatus
             defaultCbt
             __typename
           }
-
+ 
           fragment OrganizationsColumnFragment on HierarchyObject {
             allOrgs {
               name
@@ -1316,14 +1324,14 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment MssqlNameColumnFragment on HierarchyObject {
             id
             name
             objectType
             __typename
           }
-
+ 
           fragment CdmClusterColumnFragment on CdmHierarchyObject {
             replicatedObjectCount
             cluster {
@@ -1335,7 +1343,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment CdmClusterLabelFragment on CdmHierarchyObject {
             cluster {
               id
@@ -1349,7 +1357,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment EffectiveSlaColumnFragment on HierarchyObject {
             id
             effectiveSlaDomain {
@@ -1369,7 +1377,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment EffectiveSlaDomainFragment on SlaDomain {
             id
             name
@@ -1391,7 +1399,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment SLADomainFragment on SlaDomain {
             id
             name
@@ -1406,7 +1414,7 @@ function Get-mssqlFCs{
             }
             __typename
           }
-
+ 
           fragment ClusterChildInstancesEffectiveSlaColumnFragment on WindowsCluster {
             id
             instanceDescendantConnection: descendantConnection(filter: `$instanceDescendantFilter, typeFilter: [MssqlInstance]) {
@@ -1430,7 +1438,7 @@ function Get-mssqlFCs{
         $JSON_BODY = $JSON_BODY | ConvertTo-Json
         $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
         $snappableInfo += (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).edges).node
-
+ 
         while ((((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).hasNextPage -eq $true){
             $endCursor = (((($result.content | convertFrom-Json).data).mssqlTopLevelDescendants).pageInfo).endCursor
             Write-Host ("Looking at End Cursor " + $endCursor)
@@ -1541,7 +1549,7 @@ function Get-mssqlFCs{
             $JSON_BODY = $JSON_BODY | ConvertTo-Json
             $result = Invoke-WebRequest -Uri $POLARIS_URL -Method POST -Headers $headers -Body $JSON_BODY
             $snappableInfo += (((($result.content | ConvertFrom-Json).data).mssqlTopLevelDescendants).edges).node
-
+ 
         }
     }
     catch{
@@ -1550,7 +1558,7 @@ function Get-mssqlFCs{
       finally{
         Write-Output $snappableInfo
       }
-
+ 
 }
 function Get-SLADomains{
   <#
@@ -1671,7 +1679,7 @@ function Get-SLADomains{
             __typename
           }
         }
-
+ 
         fragment AllObjectSpecificConfigsForSLAFragment on SlaDomain {
           objectSpecificConfigs {
             awsRdsConfig {
@@ -1800,7 +1808,7 @@ function Get-SLADomains{
           }
           __typename
         }
-
+ 
         fragment SnapshotSchedulesForSlaDomainFragment on SnapshotSchedule {
           minute {
             basicSchedule {
@@ -1873,7 +1881,7 @@ function Get-SLADomains{
           }
           __typename
         }
-
+ 
         fragment DetailedReplicationSpecsV2ForSlaDomainFragment on ReplicationSpecV2 {
           replicationLocalRetentionDuration {
             duration
@@ -1981,7 +1989,7 @@ function Get-SLADomains{
           }
           __typename
         }
-
+ 
         fragment SlaAssignedToOrganizationsFragment on SlaDomain {
           ... on GlobalSlaReply {
             allOrgsWithAccess {
@@ -2185,7 +2193,7 @@ function Get-PhysicalHost{
         __typename
       }
     }
-
+ 
     fragment OrganizationsColumnFragment on HierarchyObject {
       allOrgs {
         name
@@ -2193,7 +2201,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment EffectiveSlaDomainFragment on SlaDomain {
       id
       name
@@ -2215,7 +2223,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment SLADomainFragment on SlaDomain {
       id
       name
@@ -2230,7 +2238,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment ClusterNodeConnectionFragment on Cluster {
       clusterNodeConnection {
         nodes {
@@ -2243,7 +2251,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment PhysicalHostConnectionStatusColumnFragment on PhysicalHost {
       id
       authorizedOperations
@@ -2253,7 +2261,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment LinuxFilesetListFragment on LinuxFileset {
       isRelic
       excludes: pathExcluded
@@ -2270,7 +2278,7 @@ function Get-PhysicalHost{
       }
       __typename
     }
-
+ 
     fragment WindowsFilesetListFragment on WindowsFileset {
       isRelic
       excludes: pathExcluded
@@ -2378,7 +2386,7 @@ function Connect-RubrikCdm{
             'cluster_uuid' = $clusterId
         } | ConvertTo-Json
         $cdmTokenUrl = ($serviceAccountObj.access_token_uri).replace("client_token", "cdm_client_token")
-    $rubrikCdm = Invoke-RestMethod -Method Post -uri $cdmTokenUrl -ContentType application/json -body $connectionData -skipcertificateCheck
+    $rubrikCdm = Invoke-RestMethod -Method Post -uri $cdmTokenUrl -ContentType application/json -body $connectionData @certSkipParam
   }
   catch{
     Write-Error("Error $($_)")
@@ -2402,8 +2410,8 @@ function Connect-RubrikSpecialCdm{
               'secret' = $serviceAccountObj.secret
           } | ConvertTo-Json
           $uriString = "https://$($clusterIp)/api/v1/service_account/session"
-
-      $rubrikCdm = Invoke-RestMethod -Method Post -uri $uriString -ContentType application/json -body $connectionData -skipcertificateCheck
+ 
+      $rubrikCdm = Invoke-RestMethod -Method Post -uri $uriString -ContentType application/json -body $connectionData @certSkipParam
     }
     catch{
       Write-Error("Error $($_)")
@@ -2415,6 +2423,19 @@ function Connect-RubrikSpecialCdm{
 if($cdmValidate){
     $Output_directory = (Get-Location).path
     $mdate = (Get-Date).tostring("yyyyMMddHHmm")
+    if($PSVersionTable.PSVersion.Major -lt 6){
+        if(-not ("TrustAllCertsPolicy" -as [type])){
+            Add-Type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAllCertsPolicy : ICertificatePolicy {
+    public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) { return true; }
+}
+"@
+        }
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    }
     #Establish Session to Local CDM
     $rubrikConnection = Connect-RubrikSpecialCdm -clusterIp $clusterIp -serviceAccountJson $ServiceAccountJson
     $rubtok = $rubrikconnection.token
@@ -2425,12 +2446,12 @@ if($cdmValidate){
     ForEach($instance in $sqlList){
       if($instance.assignmentType -eq "standAlone"){
         Write-Output ("Investigating SLA for SQL Host " + $instance.hostName)
-        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.hostName +"&object_type=Host,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.hostName +"&object_type=Host,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken @certSkipParam
         $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
         $instanceInfo = $singleinstance.instanceChildren
         if (-not ([string]::IsNullOrEmpty($instanceInfo))){
             ForEach($childinstance in $instanceInfo){
-                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken @certSkipParam
                 $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
                 ForEach($DB in $DBinfo){
                     $DBSummaryInfo = New-Object PSobject
@@ -2447,9 +2468,9 @@ if($cdmValidate){
     }
       if($instance.assignmentType -eq "availabilityGroup"){
         Write-Output ("Investigating SLA for SQL Availability Group " + $instance.sqlClusterName)
-        $AGInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName + "&object_type=MssqlAvailabilityGroup,MssqlDatabase&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $AGInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName + "&object_type=MssqlAvailabilityGroup,MssqlDatabase&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken @certSkipParam
         $AGInstance = ($AGInstance.content | ConvertFrom-Json).data
-        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/"+ $AGInstance.id + "/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/"+ $AGInstance.id + "/children?has_instances=false&is_clustered=false&is_live_mount=false&limit=51&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken @certSkipParam
         $DBinfo = ($singleinstance.content | ConvertFrom-Json).data
         ForEach($DB in $DBinfo){
             $DBSummaryInfo = New-Object PSobject
@@ -2464,12 +2485,12 @@ if($cdmValidate){
     }
       if($instance.assignmentType -eq "failoverCluster"){
         Write-Output ("Investigating SLA for SQL Failover Cluster " + $instance.sqlClusterName)
-        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName +"&object_type=WindowsCluster,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+        $singleInstance = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/hierarchy/root/children?has_instances=true&is_clustered=false&is_live_mount=false&limit=51&name="+ $instance.sqlClusterName +"&object_type=WindowsCluster,MssqlInstance&offset=0&primary_cluster_id=local&snappable_status=Protectable&sort_by=name&sort_order=asc") -Method GET -Headers $RubrikToken @certSkipParam
         $singleInstance = ($singleInstance.Content | ConvertFrom-Json).data
         $instanceInfo = $singleinstance.instanceChildren
         if (-not ([string]::IsNullOrEmpty($instanceInfo))){
             ForEach($childinstance in $instanceInfo){
-                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken -SkipCertificateCheck
+                $DBInfo = Invoke-WebRequest -Uri ("https://" + $clusterIp + "/api/v1/mssql/db?instance_id="+ $childinstance +"&is_relic=false&is_live_mount=false&include_backup_task_info=false") -Method GET -Headers $RubrikToken @certSkipParam
                 $DBInfo = ($DBInfo.Content | ConvertFrom-Json).data
                 ForEach($DB in $DBinfo){
                     $DBSummaryInfo = New-Object PSobject
@@ -2520,7 +2541,7 @@ if($OnboardHosts){
             $clientErrorInfo = New-Object psobject
             $clientErrorInfo | Add-Member -NotePropertyName "Name" -NotePropertyValue $client
             $clientErrorInfo | Add-Member -NotePropertyName "errorMessage" -NotePropertyValue $errorMessage
-
+ 
             $MissinghostList += $clientErrorInfo
         }
         $IndexCount++
