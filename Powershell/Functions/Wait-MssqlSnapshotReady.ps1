@@ -6,7 +6,8 @@ function Wait-MssqlSnapshotReady {
     .DESCRIPTION
     The on-demand backup mutation returns as soon as the job is queued. Rubrik takes a VSS snapshot
     of the database files, releases the freeze, and then reads the data from the shadow copy. Once
-    the 'Initialized SQL Server backup' event is logged the snapshot exists, so anything that was
+    the 'Retrieving SQL Server backup ... using N parallel connections' event is logged the data
+    pull has started, which means the snapshot exists, so anything that was
     waiting on a consistent point in time (for example an application unlock/thaw) can proceed
     without waiting for the data transfer. Use -WaitForCompletion to wait for the whole job instead.
 
@@ -20,8 +21,8 @@ function Wait-MssqlSnapshotReady {
     Wait-MssqlSnapshotReady -DatabaseId $id -StartedAfter $start
 
     .NOTES
-    The 'Initialized' event is treated as the snapshot-ready signal based on observed event
-    timelines. Override -ReadyPattern if your CDM version words it differently.
+    'Retrieving' is the in-progress event and may be replaced by 'Retrieved' on short jobs, so
+    both match. Override -ReadyPattern if your CDM version words it differently.
     #>
     [CmdletBinding()]
     param (
@@ -33,7 +34,7 @@ function Wait-MssqlSnapshotReady {
         [hashtable]$Headers = $headers,
         [int]$PollSeconds = 10,
         [int]$TimeoutSeconds = 900,
-        [string]$ReadyPattern = '^Initialized SQL Server backup',
+        [string]$ReadyPattern = '^(Retrieving|Retrieved) SQL Server backup',
         [string]$CompletePattern = '^Completed backup',
         [switch]$WaitForCompletion
     )
