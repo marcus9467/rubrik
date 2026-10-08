@@ -266,6 +266,35 @@ function Wait-MssqlSnapshotReady {
     Start-MSSQLBackup -databaseId $id -SLAId $sla
     Wait-MssqlSnapshotReady -DatabaseId $id -StartedAfter $start
 
+    State          : Ready
+    SeriesId       : 3f9a1c52-0b7e-4d1a-9c63-2e8d5a7b41f0
+    ReadyTime      : 10/8/2026 1:12:41 AM
+    ReadyMessage   : Retrieving SQL Server backup with 2 files and 62.1 GB data
+                     using 8 parallel connections.
+    LastStatus     : Running
+    ElapsedSeconds : 154
+
+    The snapshot exists and the data pull has started, so the unlock/thaw can run.
+
+    .EXAMPLE
+    Wait-MssqlSnapshotReady -DatabaseId $id -StartedAfter $start -WaitForCompletion
+
+    State          : Completed
+    ElapsedSeconds : 312
+
+    Waits for the entire backup job instead of just the snapshot.
+
+    .EXAMPLE
+    Wait-MssqlSnapshotReady -DatabaseId $id -StartedAfter $start
+
+    State          : Failed
+    LastStatus     : Failure
+    ElapsedSeconds : 47
+
+    The backup failed or was canceled before the snapshot was ready. Run the unlock/thaw anyway
+    and alert. A State of TimedOut (LastStatus Queued or Running) means the job never reached the
+    snapshot within -TimeoutSeconds, and should be handled the same way.
+
     .NOTES
     'Retrieving' is the in-progress event and may be replaced by 'Retrieved' on short jobs, so
     both match. Override -ReadyPattern if your CDM version words it differently.
